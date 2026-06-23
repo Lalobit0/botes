@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   }
 
   const { data, error } = await supabase
-    .from('trend_signals')
+    .from('radar_trend_signals')
     .insert({ product_id, fuente, pais, tipo_metrica, valor, rank, tier })
     .select()
     .single()

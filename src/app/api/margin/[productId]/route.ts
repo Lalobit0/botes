@@ -21,24 +21,23 @@ export async function POST(
   }
 
   const { data, error } = await supabase
-    .from('margin_inputs')
+    .from('radar_margin_inputs')
     .upsert(inputs)
     .select()
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // Recalcular oportunidad
   const [signalsRes, satRes] = await Promise.all([
-    supabase.from('trend_signals').select('*').eq('product_id', productId),
-    supabase.from('mx_saturation').select('*').eq('product_id', productId).order('capturado_at', { ascending: false }).limit(1),
+    supabase.from('radar_trend_signals').select('*').eq('product_id', productId),
+    supabase.from('radar_mx_saturation').select('*').eq('product_id', productId).order('capturado_at', { ascending: false }).limit(1),
   ])
 
   const signals = signalsRes.data ?? []
   const saturation = satRes.data?.[0] ?? null
   const score = calcularOportunidad(signals, saturation, inputs)
 
-  await supabase.from('opportunities').upsert({
+  await supabase.from('radar_opportunities').upsert({
     product_id: productId,
     momentum_score: score.momentumScore,
     saturacion_score: score.saturacionScore,

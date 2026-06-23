@@ -11,7 +11,7 @@ export async function POST(
   const supabase = await createClient()
 
   const { data: product, error: prodError } = await supabase
-    .from('products')
+    .from('radar_products')
     .select('keyword_busqueda')
     .eq('id', productId)
     .single()
@@ -21,10 +21,8 @@ export async function POST(
   }
 
   try {
-    // Buscar en ML
     const mlResult = await buscarEnML(product.keyword_busqueda)
 
-    // Comprobar si aparece en tendencias (requiere credenciales ML)
     let aparece_en_ml_trends = false
     if (process.env.ML_CLIENT_ID && process.env.ML_CLIENT_SECRET) {
       try {
@@ -33,13 +31,10 @@ export async function POST(
         aparece_en_ml_trends = tendencias.some((t) =>
           t.includes(product.keyword_busqueda.toLowerCase())
         )
-      } catch {
-        // Sin credenciales, seguimos sin el dato de tendencias
-      }
+      } catch {}
     }
 
-    // Guardar saturación
-    const { error: satError } = await supabase.from('mx_saturation').insert({
+    const { error: satError } = await supabase.from('radar_mx_saturation').insert({
       product_id: productId,
       num_publicaciones: mlResult.numPublicaciones,
       precio_min: mlResult.precioMin,
@@ -50,10 +45,9 @@ export async function POST(
 
     if (satError) throw new Error(satError.message)
 
-    // Recalcular score
     const [signalsRes, marginRes] = await Promise.all([
-      supabase.from('trend_signals').select('*').eq('product_id', productId),
-      supabase.from('margin_inputs').select('*').eq('product_id', productId).single(),
+      supabase.from('radar_trend_signals').select('*').eq('product_id', productId),
+      supabase.from('radar_margin_inputs').select('*').eq('product_id', productId).single(),
     ])
 
     const satForScore = {
@@ -67,13 +61,9 @@ export async function POST(
       capturado_at: new Date().toISOString(),
     }
 
-    const score = calcularOportunidad(
-      signalsRes.data ?? [],
-      satForScore,
-      marginRes.data ?? null
-    )
+    const score = calcularOportunidad(signalsRes.data ?? [], satForScore, marginRes.data ?? null)
 
-    await supabase.from('opportunities').upsert({
+    await supabase.from('radar_opportunities').upsert({
       product_id: productId,
       momentum_score: score.momentumScore,
       saturacion_score: score.saturacionScore,
@@ -83,11 +73,7 @@ export async function POST(
       actualizado_at: new Date().toISOString(),
     })
 
-    return NextResponse.json({
-      saturation: mlResult,
-      aparece_en_ml_trends,
-      score,
-    })
+    return NextResponse.json({ saturation: mlResult, aparece_en_ml_trends, score })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error desconocido'
     return NextResponse.json({ error: msg }, { status: 500 })

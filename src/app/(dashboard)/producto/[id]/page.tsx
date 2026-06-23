@@ -40,8 +40,8 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
     setProduct(data)
     setEstado(data.estado)
     setNotas(data.notas ?? '')
-    if (data.margin_inputs) {
-      setMargin(data.margin_inputs)
+    if (data.radar_margin_inputs) {
+      setMargin(data.radar_margin_inputs)
     }
     setLoading(false)
   }, [id, router])
@@ -86,8 +86,8 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
   if (loading) return <div className="text-center py-16 text-gray-400">Cargando...</div>
   if (!product) return null
 
-  const opp = product.opportunities
-  const latestSat = product.mx_saturation?.[product.mx_saturation.length - 1]
+  const opp = product.radar_opportunities
+  const latestSat = product.radar_mx_saturation?.[product.radar_mx_saturation.length - 1]
 
   return (
     <div className="flex flex-col gap-6 max-w-4xl">
@@ -263,7 +263,7 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
       {/* Señales de momentum */}
       <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
         <h2 className="font-semibold text-gray-900 mb-4">Señales de momentum capturadas</h2>
-        {product.trend_signals?.length > 0 ? (
+        {product.radar_trend_signals?.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
@@ -274,7 +274,7 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {product.trend_signals.map((s) => (
+                {product.radar_trend_signals.map((s) => (
                   <tr key={s.id}>
                     <td className="py-2 pr-4 font-medium">{s.fuente}</td>
                     <td className="py-2 pr-4 text-gray-500">{s.pais}</td>

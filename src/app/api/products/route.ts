@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 export async function GET() {
   const supabase = await createClient()
   const { data, error } = await supabase
-    .from('products')
+    .from('radar_products')
     .select('*')
     .order('created_at', { ascending: false })
 
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   }
 
   const { data, error } = await supabase
-    .from('products')
+    .from('radar_products')
     .insert({ nombre, keyword_busqueda, categoria, nicho, notas })
     .select()
     .single()

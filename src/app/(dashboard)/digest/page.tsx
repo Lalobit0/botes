@@ -10,7 +10,7 @@ interface OppRow {
   nicho: string | null
   estado: string
   created_at: string
-  opportunities: {
+  radar_opportunities: {
     opportunity_score: number | null
     momentum_score: number | null
     margen_pct: number | null
@@ -31,7 +31,7 @@ export default function DigestPage() {
         hace7dias.setDate(hace7dias.getDate() - 7)
         const recientes = data.filter((r) => {
           const creado = new Date(r.created_at)
-          return creado >= hace7dias && (r.opportunities?.opportunity_score ?? 0) > 0
+          return creado >= hace7dias && (r.radar_opportunities?.opportunity_score ?? 0) > 0
         })
         setRows(recientes)
         setLoading(false)
@@ -74,26 +74,26 @@ export default function DigestPage() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <EstadoBadge estado={row.estado} />
-                  <ScoreBadge score={row.opportunities?.opportunity_score ?? null} />
+                  <ScoreBadge score={row.radar_opportunities?.opportunity_score ?? null} />
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
                 <div className="bg-gray-50 rounded-lg p-2">
                   <p className="text-gray-400">Momentum</p>
                   <p className="font-semibold text-gray-800 mt-0.5">
-                    {row.opportunities?.momentum_score?.toFixed(0) ?? '—'}
+                    {row.radar_opportunities?.momentum_score?.toFixed(0) ?? '—'}
                   </p>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-2">
                   <p className="text-gray-400">Margen %</p>
-                  <p className={`font-semibold mt-0.5 ${(row.opportunities?.margen_pct ?? 0) > 0 ? 'text-green-700' : 'text-gray-800'}`}>
-                    {row.opportunities?.margen_pct != null ? `${row.opportunities.margen_pct.toFixed(1)}%` : '—'}
+                  <p className={`font-semibold mt-0.5 ${(row.radar_opportunities?.margen_pct ?? 0) > 0 ? 'text-green-700' : 'text-gray-800'}`}>
+                    {row.radar_opportunities?.margen_pct != null ? `${row.radar_opportunities.margen_pct.toFixed(1)}%` : '—'}
                   </p>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-2">
                   <p className="text-gray-400">Score</p>
                   <p className="font-semibold text-indigo-700 mt-0.5">
-                    {row.opportunities?.opportunity_score?.toFixed(1) ?? '—'}
+                    {row.radar_opportunities?.opportunity_score?.toFixed(1) ?? '—'}
                   </p>
                 </div>
               </div>

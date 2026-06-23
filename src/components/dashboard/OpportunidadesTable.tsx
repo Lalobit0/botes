@@ -9,7 +9,7 @@ interface Fila {
   nombre: string
   nicho: string | null
   estado: string
-  opportunities: {
+  radar_opportunities: {
     momentum_score: number | null
     saturacion_score: number | null
     margen_pct: number | null
@@ -51,7 +51,7 @@ export function OpportunidadesTable({ rows, onRefresh }: Props) {
             </tr>
           )}
           {rows.map((row) => {
-            const opp = row.opportunities
+            const opp = row.radar_opportunities
             return (
               <tr key={row.id} className="hover:bg-gray-50 transition-colors">
                 <td className="px-4 py-3">

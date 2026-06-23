@@ -8,7 +8,7 @@ interface OppRow {
   nicho: string | null
   estado: ProductEstado
   created_at: string
-  opportunities: { opportunity_score: number | null } | null
+  radar_opportunities: { opportunity_score: number | null } | null
 }
 
 export async function GET(request: Request) {
@@ -18,11 +18,11 @@ export async function GET(request: Request) {
   const estado = searchParams.get('estado') as ProductEstado | null
 
   let query = supabase
-    .from('products')
+    .from('radar_products')
     .select(`
       *,
-      opportunities(*),
-      mx_saturation(num_publicaciones, precio_mediana, aparece_en_ml_trends, capturado_at)
+      radar_opportunities(*),
+      radar_mx_saturation(num_publicaciones, precio_mediana, aparece_en_ml_trends, capturado_at)
     `)
 
   if (nicho) query = query.eq('nicho', nicho)
@@ -34,8 +34,8 @@ export async function GET(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const sorted = ((data ?? []) as OppRow[]).sort((a, b) => {
-    const sa = a.opportunities?.opportunity_score ?? 0
-    const sb = b.opportunities?.opportunity_score ?? 0
+    const sa = a.radar_opportunities?.opportunity_score ?? 0
+    const sb = b.radar_opportunities?.opportunity_score ?? 0
     return sb - sa
   })
 

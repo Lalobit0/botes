@@ -5,9 +5,9 @@ export type TrendFuente = 'tiktok' | 'aliexpress' | 'amazon_us' | 'google_trends
 export type Json = string | number | boolean | null | { [key: string]: Json } | Json[]
 
 export interface Database {
-  radar: {
+  public: {
     Tables: {
-      products: {
+      radar_products: {
         Row: {
           id: string
           nombre: string
@@ -38,7 +38,7 @@ export interface Database {
         }
         Relationships: []
       }
-      trend_signals: {
+      radar_trend_signals: {
         Row: {
           id: string
           product_id: string
@@ -72,7 +72,7 @@ export interface Database {
         }
         Relationships: []
       }
-      mx_saturation: {
+      radar_mx_saturation: {
         Row: {
           id: string
           product_id: string
@@ -102,7 +102,7 @@ export interface Database {
         }
         Relationships: []
       }
-      margin_inputs: {
+      radar_margin_inputs: {
         Row: {
           product_id: string
           precio_origen_usd: number | null
@@ -131,7 +131,7 @@ export interface Database {
         }
         Relationships: []
       }
-      opportunities: {
+      radar_opportunities: {
         Row: {
           product_id: string
           momentum_score: number | null
@@ -168,15 +168,15 @@ export interface Database {
   }
 }
 
-export type Product = Database['radar']['Tables']['products']['Row']
-export type TrendSignal = Database['radar']['Tables']['trend_signals']['Row']
-export type MxSaturation = Database['radar']['Tables']['mx_saturation']['Row']
-export type MarginInputs = Database['radar']['Tables']['margin_inputs']['Row']
-export type Opportunity = Database['radar']['Tables']['opportunities']['Row']
+export type Product = Database['public']['Tables']['radar_products']['Row']
+export type TrendSignal = Database['public']['Tables']['radar_trend_signals']['Row']
+export type MxSaturation = Database['public']['Tables']['radar_mx_saturation']['Row']
+export type MarginInputs = Database['public']['Tables']['radar_margin_inputs']['Row']
+export type Opportunity = Database['public']['Tables']['radar_opportunities']['Row']
 
 export interface ProductConDetalle extends Product {
-  trend_signals: TrendSignal[]
-  mx_saturation: MxSaturation[]
-  margin_inputs: MarginInputs | null
-  opportunities: Opportunity | null
+  radar_trend_signals: TrendSignal[]
+  radar_mx_saturation: MxSaturation[]
+  radar_margin_inputs: MarginInputs | null
+  radar_opportunities: Opportunity | null
 }

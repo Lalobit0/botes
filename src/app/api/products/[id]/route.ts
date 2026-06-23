@@ -6,13 +6,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const supabase = await createClient()
 
   const { data, error } = await supabase
-    .from('products')
+    .from('radar_products')
     .select(`
       *,
-      trend_signals(*),
-      mx_saturation(*),
-      margin_inputs(*),
-      opportunities(*)
+      radar_trend_signals(*),
+      radar_mx_saturation(*),
+      radar_margin_inputs(*),
+      radar_opportunities(*)
     `)
     .eq('id', id)
     .single()
@@ -27,7 +27,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const body = await request.json()
 
   const { data, error } = await supabase
-    .from('products')
+    .from('radar_products')
     .update(body)
     .eq('id', id)
     .select()
@@ -41,7 +41,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const { id } = await params
   const supabase = await createClient()
 
-  const { error } = await supabase.from('products').delete().eq('id', id)
+  const { error } = await supabase.from('radar_products').delete().eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return new NextResponse(null, { status: 204 })
 }
