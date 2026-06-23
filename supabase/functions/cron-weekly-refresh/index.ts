@@ -60,6 +60,37 @@ async function buscarEnML(keyword: string) {
   }
 }
 
+// Momentum automático desde Google Trends (no oficial)
+async function getGoogleTrendsMomentum(keyword: string): Promise<number | null> {
+  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36'
+  const strip = (t: string) => { const i = t.indexOf('{'); return i >= 0 ? t.slice(i) : t }
+  try {
+    const req = { comparisonItem: [{ keyword, geo: 'US', time: 'today 3-m' }], category: 0, property: '' }
+    const exploreUrl = `https://trends.google.com/trends/api/explore?hl=en-US&tz=-360&req=${encodeURIComponent(JSON.stringify(req))}`
+    const eRes = await fetch(exploreUrl, { headers: { 'User-Agent': UA, 'Accept-Language': 'en-US' } })
+    if (!eRes.ok) return null
+    const eJson = JSON.parse(strip(await eRes.text()))
+    const widget = (eJson.widgets ?? []).find((w: { id: string }) => w.id === 'TIMESERIES')
+    if (!widget) return null
+
+    const mUrl = `https://trends.google.com/trends/api/widgetdata/multiline?hl=en-US&tz=-360&req=${encodeURIComponent(JSON.stringify(widget.request))}&token=${widget.token}`
+    const mRes = await fetch(mUrl, { headers: { 'User-Agent': UA } })
+    if (!mRes.ok) return null
+    const mJson = JSON.parse(strip(await mRes.text()))
+    const vals: number[] = (mJson.default?.timelineData ?? []).map((d: { value: number[] }) => d.value?.[0] ?? 0)
+    if (vals.length < 4) return null
+
+    const third = Math.max(1, Math.floor(vals.length / 3))
+    const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length
+    const firstAvg = avg(vals.slice(0, third))
+    const lastAvg = avg(vals.slice(-third))
+    const growthPct = ((lastAvg - firstAvg) / Math.max(firstAvg, 1)) * 100
+    return Math.min(100, Math.max(0, 50 + growthPct / 2))
+  } catch {
+    return null
+  }
+}
+
 function calcularOportunidad(
   signals: Array<{ fuente: string; tier?: string | null; rank?: number | null; valor?: number | null }>,
   sat: { num_publicaciones: number | null; aparece_en_ml_trends: boolean } | null,
@@ -102,7 +133,7 @@ function calcularOportunidad(
 
 Deno.serve(async () => {
   const { data: products } = await supabase
-    .from('products')
+    .from('radar_products')
     .select('id, keyword_busqueda')
     .neq('estado', 'descartado')
 
@@ -119,9 +150,8 @@ Deno.serve(async () => {
         t.includes(product.keyword_busqueda.toLowerCase())
       )
 
-      await supabase.from('mx_saturation').insert({
+      await supabase.from('radar_mx_saturation').insert({
         product_id: product.id,
-        ...mlResult,
         num_publicaciones: mlResult.numPublicaciones,
         precio_min: mlResult.precioMin,
         precio_max: mlResult.precioMax,
@@ -129,15 +159,29 @@ Deno.serve(async () => {
         aparece_en_ml_trends,
       })
 
+      // Momentum automático desde Google Trends (reemplaza señal anterior)
+      const gtScore = await getGoogleTrendsMomentum(product.keyword_busqueda)
+      if (gtScore != null) {
+        await supabase.from('radar_trend_signals').delete()
+          .eq('product_id', product.id).eq('fuente', 'google_trends')
+        await supabase.from('radar_trend_signals').insert({
+          product_id: product.id,
+          fuente: 'google_trends',
+          pais: 'US',
+          tipo_metrica: 'search_slope',
+          valor: gtScore,
+        })
+      }
+
       const [{ data: signals }, { data: margin }] = await Promise.all([
-        supabase.from('trend_signals').select('*').eq('product_id', product.id),
-        supabase.from('margin_inputs').select('*').eq('product_id', product.id).single(),
+        supabase.from('radar_trend_signals').select('*').eq('product_id', product.id),
+        supabase.from('radar_margin_inputs').select('*').eq('product_id', product.id).single(),
       ])
 
       const satFake = { num_publicaciones: mlResult.numPublicaciones, aparece_en_ml_trends }
       const score = calcularOportunidad(signals ?? [], satFake, margin)
 
-      await supabase.from('opportunities').upsert({
+      await supabase.from('radar_opportunities').upsert({
         product_id: product.id,
         momentum_score: score.momentumScore,
         saturacion_score: score.satScore,

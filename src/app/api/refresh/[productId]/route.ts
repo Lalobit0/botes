@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { buscarEnML, obtenerTendenciasML, obtenerAccessToken } from '@/lib/ml/api'
+import { getGoogleTrendsMomentum } from '@/lib/google/trends'
 import { calcularOportunidad } from '@/lib/scoring'
 
 export async function POST(
@@ -45,6 +46,25 @@ export async function POST(
 
     if (satError) throw new Error(satError.message)
 
+    // Momentum automático desde Google Trends (US). Reemplaza la señal anterior.
+    let googleScore: number | null = null
+    const gt = await getGoogleTrendsMomentum(product.keyword_busqueda)
+    if (gt) {
+      googleScore = gt.score
+      await supabase
+        .from('radar_trend_signals')
+        .delete()
+        .eq('product_id', productId)
+        .eq('fuente', 'google_trends')
+      await supabase.from('radar_trend_signals').insert({
+        product_id: productId,
+        fuente: 'google_trends',
+        pais: 'US',
+        tipo_metrica: 'search_slope',
+        valor: gt.score,
+      })
+    }
+
     const [signalsRes, marginRes] = await Promise.all([
       supabase.from('radar_trend_signals').select('*').eq('product_id', productId),
       supabase.from('radar_margin_inputs').select('*').eq('product_id', productId).single(),
@@ -73,7 +93,12 @@ export async function POST(
       actualizado_at: new Date().toISOString(),
     })
 
-    return NextResponse.json({ saturation: mlResult, aparece_en_ml_trends, score })
+    return NextResponse.json({
+      saturation: mlResult,
+      aparece_en_ml_trends,
+      google_trends: googleScore,
+      score,
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error desconocido'
     return NextResponse.json({ error: msg }, { status: 500 })
