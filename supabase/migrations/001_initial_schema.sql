@@ -1,5 +1,10 @@
--- Catálogo normalizado de productos/keywords
-create table products (
+-- Schema aislado para Radar MX (no toca las tablas existentes en public)
+-- Proyecto: STREAMBITAPP (nxwvkyfeaaywfmungqbh)
+-- YA APLICADO en Supabase Dashboard. Este archivo es solo referencia.
+
+create schema if not exists radar;
+
+create table radar.products (
   id uuid primary key default gen_random_uuid(),
   nombre text not null,
   keyword_busqueda text not null,
@@ -11,10 +16,9 @@ create table products (
   created_at timestamptz default now()
 );
 
--- Señales crudas de momentum desde fuentes externas
-create table trend_signals (
+create table radar.trend_signals (
   id uuid primary key default gen_random_uuid(),
-  product_id uuid references products(id) on delete cascade,
+  product_id uuid references radar.products(id) on delete cascade,
   fuente text not null check (fuente in ('tiktok','aliexpress','amazon_us','google_trends')),
   pais text not null default 'US',
   tipo_metrica text not null,
@@ -24,10 +28,9 @@ create table trend_signals (
   capturado_at timestamptz default now()
 );
 
--- Foto de saturación en Mercado Libre MX
-create table mx_saturation (
+create table radar.mx_saturation (
   id uuid primary key default gen_random_uuid(),
-  product_id uuid references products(id) on delete cascade,
+  product_id uuid references radar.products(id) on delete cascade,
   num_publicaciones int,
   precio_min numeric,
   precio_max numeric,
@@ -36,9 +39,8 @@ create table mx_saturation (
   capturado_at timestamptz default now()
 );
 
--- Datos de costo para calcular margen
-create table margin_inputs (
-  product_id uuid primary key references products(id) on delete cascade,
+create table radar.margin_inputs (
+  product_id uuid primary key references radar.products(id) on delete cascade,
   precio_origen_usd numeric,
   tipo_cambio numeric default 18.0,
   costo_envio_importacion_mxn numeric default 0,
@@ -47,9 +49,8 @@ create table margin_inputs (
   precio_venta_estimado_mxn numeric
 );
 
--- Score calculado
-create table opportunities (
-  product_id uuid primary key references products(id) on delete cascade,
+create table radar.opportunities (
+  product_id uuid primary key references radar.products(id) on delete cascade,
   momentum_score numeric,
   saturacion_score numeric,
   margen_estimado_mxn numeric,
@@ -58,15 +59,22 @@ create table opportunities (
   actualizado_at timestamptz default now()
 );
 
--- RLS: solo usuarios autenticados
-alter table products enable row level security;
-alter table trend_signals enable row level security;
-alter table mx_saturation enable row level security;
-alter table margin_inputs enable row level security;
-alter table opportunities enable row level security;
+-- RLS
+alter table radar.products enable row level security;
+alter table radar.trend_signals enable row level security;
+alter table radar.mx_saturation enable row level security;
+alter table radar.margin_inputs enable row level security;
+alter table radar.opportunities enable row level security;
 
-create policy "Acceso autenticado" on products for all using (auth.role() = 'authenticated');
-create policy "Acceso autenticado" on trend_signals for all using (auth.role() = 'authenticated');
-create policy "Acceso autenticado" on mx_saturation for all using (auth.role() = 'authenticated');
-create policy "Acceso autenticado" on margin_inputs for all using (auth.role() = 'authenticated');
-create policy "Acceso autenticado" on opportunities for all using (auth.role() = 'authenticated');
+create policy "Acceso autenticado" on radar.products for all using (auth.role() = 'authenticated');
+create policy "Acceso autenticado" on radar.trend_signals for all using (auth.role() = 'authenticated');
+create policy "Acceso autenticado" on radar.mx_saturation for all using (auth.role() = 'authenticated');
+create policy "Acceso autenticado" on radar.margin_inputs for all using (auth.role() = 'authenticated');
+create policy "Acceso autenticado" on radar.opportunities for all using (auth.role() = 'authenticated');
+
+-- Permisos a roles de Supabase
+grant usage on schema radar to anon, authenticated, service_role;
+grant all on all tables in schema radar to anon, authenticated, service_role;
+grant all on all sequences in schema radar to anon, authenticated, service_role;
+alter default privileges in schema radar grant all on tables to anon, authenticated, service_role;
+alter default privileges in schema radar grant all on sequences to anon, authenticated, service_role;

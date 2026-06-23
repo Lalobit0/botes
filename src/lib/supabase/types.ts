@@ -5,7 +5,7 @@ export type TrendFuente = 'tiktok' | 'aliexpress' | 'amazon_us' | 'google_trends
 export type Json = string | number | boolean | null | { [key: string]: Json } | Json[]
 
 export interface Database {
-  public: {
+  radar: {
     Tables: {
       products: {
         Row: {
@@ -168,11 +168,11 @@ export interface Database {
   }
 }
 
-export type Product = Database['public']['Tables']['products']['Row']
-export type TrendSignal = Database['public']['Tables']['trend_signals']['Row']
-export type MxSaturation = Database['public']['Tables']['mx_saturation']['Row']
-export type MarginInputs = Database['public']['Tables']['margin_inputs']['Row']
-export type Opportunity = Database['public']['Tables']['opportunities']['Row']
+export type Product = Database['radar']['Tables']['products']['Row']
+export type TrendSignal = Database['radar']['Tables']['trend_signals']['Row']
+export type MxSaturation = Database['radar']['Tables']['mx_saturation']['Row']
+export type MarginInputs = Database['radar']['Tables']['margin_inputs']['Row']
+export type Opportunity = Database['radar']['Tables']['opportunities']['Row']
 
 export interface ProductConDetalle extends Product {
   trend_signals: TrendSignal[]
