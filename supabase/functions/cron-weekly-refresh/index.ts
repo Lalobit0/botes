@@ -37,45 +37,6 @@ async function obtenerTendenciasML(token: string): Promise<string[]> {
   } catch { return [] }
 }
 
-// ML /sites/search devuelve 403 incluso con token de app. Leemos el sitio
-// público de listados (sin auth) y parseamos publicaciones + precios.
-async function buscarEnML(keyword: string) {
-  const slug = keyword.trim().toLowerCase().replace(/\s+/g, '-')
-  const url = `https://listado.mercadolibre.com.mx/${encodeURIComponent(slug).replace(/%2D/g, '-')}`
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept-Language': 'es-MX,es;q=0.9',
-    },
-  })
-  const html = await res.text()
-
-  let total = 0
-  const qty = html.match(/([\d.,]+)\s*resultados/i)
-  if (qty) total = parseInt(qty[1].replace(/[.,]/g, ''), 10) || 0
-
-  const precios: number[] = []
-  const re = /andes-money-amount__fraction[^>]*>\s*([\d.,]+)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(html)) !== null) {
-    const n = parseInt(m[1].replace(/[.,]/g, ''), 10)
-    if (n > 0) precios.push(n)
-  }
-  precios.sort((a, b) => a - b)
-
-  const mid = Math.floor(precios.length / 2)
-  const mediana = precios.length === 0 ? null
-    : precios.length % 2 !== 0 ? precios[mid]
-    : (precios[mid - 1] + precios[mid]) / 2
-
-  return {
-    numPublicaciones: total,
-    precioMin: precios[0] ?? null,
-    precioMax: precios[precios.length - 1] ?? null,
-    precioMediana: mediana,
-  }
-}
-
 // Momentum automático desde Google Trends (no oficial)
 async function getGoogleTrendsMomentum(keyword: string): Promise<number | null> {
   const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36'
@@ -161,19 +122,24 @@ Deno.serve(async () => {
   let procesados = 0
   for (const product of products) {
     try {
-      const mlResult = await buscarEnML(product.keyword_busqueda)
       const aparece_en_ml_trends = tendencias.some((t) =>
         t.includes(product.keyword_busqueda.toLowerCase())
       )
 
-      await supabase.from('radar_mx_saturation').insert({
-        product_id: product.id,
-        num_publicaciones: mlResult.numPublicaciones,
-        precio_min: mlResult.precioMin,
-        precio_max: mlResult.precioMax,
-        precio_mediana: mlResult.precioMediana,
-        aparece_en_ml_trends,
-      })
+      // La saturación se captura a mano (ML cierra su API y bloquea scraping).
+      // Reutilizamos la última capturada y solo refrescamos su flag de tendencias.
+      const { data: latestSat } = await supabase
+        .from('radar_mx_saturation')
+        .select('*')
+        .eq('product_id', product.id)
+        .order('capturado_at', { ascending: false })
+        .limit(1)
+      const saturation = latestSat?.[0] ?? null
+      if (saturation && saturation.aparece_en_ml_trends !== aparece_en_ml_trends) {
+        await supabase.from('radar_mx_saturation')
+          .update({ aparece_en_ml_trends }).eq('id', saturation.id)
+        saturation.aparece_en_ml_trends = aparece_en_ml_trends
+      }
 
       // Momentum automático desde Google Trends (reemplaza señal anterior)
       const gtScore = await getGoogleTrendsMomentum(product.keyword_busqueda)
@@ -194,8 +160,7 @@ Deno.serve(async () => {
         supabase.from('radar_margin_inputs').select('*').eq('product_id', product.id).single(),
       ])
 
-      const satFake = { num_publicaciones: mlResult.numPublicaciones, aparece_en_ml_trends }
-      const score = calcularOportunidad(signals ?? [], satFake, margin)
+      const score = calcularOportunidad(signals ?? [], saturation, margin)
 
       await supabase.from('radar_opportunities').upsert({
         product_id: product.id,

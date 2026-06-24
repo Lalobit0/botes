@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server'
+import { obtenerTendenciasML, obtenerAccessToken } from '@/lib/ml/api'
 import { createClient } from '@/lib/supabase/server'
-import { buscarEnML, obtenerTendenciasML, obtenerAccessToken } from '@/lib/ml/api'
 import { getGoogleTrendsMomentum } from '@/lib/google/trends'
 import { calcularOportunidad } from '@/lib/scoring'
 
+// Refresca lo que SÍ se puede automatizar: el momentum de Google Trends y el
+// flag de tendencias de ML. La saturación (publicaciones/precios) ya no se
+// puede obtener automáticamente (ML cierra su API y bloquea el scraping), así
+// que se captura a mano en /api/saturation. Aquí solo se reutiliza la última.
 export async function POST(
   _req: Request,
   { params }: { params: Promise<{ productId: string }> }
@@ -22,23 +26,7 @@ export async function POST(
   }
 
   try {
-    // Saturación desde el sitio público de ML (la API /search da 403). Resiliente:
-    // si falla, seguimos con Google Trends + margen en vez de tirar todo en 500.
-    let mlResult: Awaited<ReturnType<typeof buscarEnML>> = {
-      numPublicaciones: 0,
-      precioMin: null,
-      precioMax: null,
-      precioMediana: null,
-    }
-    let mlOk = false
-    try {
-      mlResult = await buscarEnML(product.keyword_busqueda)
-      mlOk = true
-    } catch (e) {
-      console.error('[refresh] saturación ML falló:', e instanceof Error ? e.message : e)
-    }
-
-    // Tendencias locales (esto sí funciona con token de app)
+    // Flag de tendencias locales: la API /trends sí funciona con token de app.
     let aparece_en_ml_trends = false
     if (process.env.ML_CLIENT_ID && process.env.ML_CLIENT_SECRET) {
       try {
@@ -48,18 +36,6 @@ export async function POST(
           t.includes(product.keyword_busqueda.toLowerCase())
         )
       } catch {}
-    }
-
-    if (mlOk) {
-      const { error: satError } = await supabase.from('radar_mx_saturation').insert({
-        product_id: productId,
-        num_publicaciones: mlResult.numPublicaciones,
-        precio_min: mlResult.precioMin,
-        precio_max: mlResult.precioMax,
-        precio_mediana: mlResult.precioMediana,
-        aparece_en_ml_trends,
-      })
-      if (satError) throw new Error(satError.message)
     }
 
     // Momentum automático desde Google Trends (US). Reemplaza la señal anterior.
@@ -81,23 +57,29 @@ export async function POST(
       })
     }
 
-    const [signalsRes, marginRes] = await Promise.all([
-      supabase.from('radar_trend_signals').select('*').eq('product_id', productId),
-      supabase.from('radar_margin_inputs').select('*').eq('product_id', productId).single(),
-    ])
+    // Si ya hay una saturación capturada, actualizamos su flag de tendencias.
+    const { data: latestSat } = await supabase
+      .from('radar_mx_saturation')
+      .select('*')
+      .eq('product_id', productId)
+      .order('capturado_at', { ascending: false })
+      .limit(1)
 
-    const satForScore = {
-      id: 'tmp',
-      product_id: productId,
-      num_publicaciones: mlResult.numPublicaciones,
-      precio_min: mlResult.precioMin,
-      precio_max: mlResult.precioMax,
-      precio_mediana: mlResult.precioMediana,
-      aparece_en_ml_trends,
-      capturado_at: new Date().toISOString(),
+    const saturation = latestSat?.[0] ?? null
+    if (saturation && saturation.aparece_en_ml_trends !== aparece_en_ml_trends) {
+      await supabase
+        .from('radar_mx_saturation')
+        .update({ aparece_en_ml_trends })
+        .eq('id', saturation.id)
+      saturation.aparece_en_ml_trends = aparece_en_ml_trends
     }
 
-    const score = calcularOportunidad(signalsRes.data ?? [], satForScore, marginRes.data ?? null)
+    const [signalsRes, marginRes] = await Promise.all([
+      supabase.from('radar_trend_signals').select('*').eq('product_id', productId),
+      supabase.from('radar_margin_inputs').select('*').eq('product_id', productId).maybeSingle(),
+    ])
+
+    const score = calcularOportunidad(signalsRes.data ?? [], saturation, marginRes.data ?? null)
 
     await supabase.from('radar_opportunities').upsert({
       product_id: productId,
@@ -110,9 +92,9 @@ export async function POST(
     })
 
     return NextResponse.json({
-      saturation: mlResult,
       aparece_en_ml_trends,
       google_trends: googleScore,
+      saturacion: saturation,
       score,
     })
   } catch (err) {

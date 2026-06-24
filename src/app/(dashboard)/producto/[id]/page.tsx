@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
 import { ScoreBadge, EstadoBadge } from '@/components/ui/Badge'
-import { RefreshCw, ChevronLeft, Save, Trash2 } from 'lucide-react'
+import { RefreshCw, ChevronLeft, Save, Trash2, Search } from 'lucide-react'
 import type { ProductConDetalle, MarginInputs } from '@/lib/supabase/types'
 import Link from 'next/link'
 
@@ -32,6 +32,12 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
   })
   const [estado, setEstado] = useState('nuevo')
   const [notas, setNotas] = useState('')
+  const [savingSat, setSavingSat] = useState(false)
+  const [sat, setSat] = useState<{
+    num_publicaciones: string
+    precio_min: string
+    precio_max: string
+  }>({ num_publicaciones: '', precio_min: '', precio_max: '' })
 
   const fetchProduct = useCallback(async (): Promise<ProductConDetalle | null> => {
     const res = await fetch(`/api/products/${id}`)
@@ -43,20 +49,38 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
     if (data.radar_margin_inputs) {
       setMargin(data.radar_margin_inputs)
     }
+    const ultima = data.radar_mx_saturation?.[data.radar_mx_saturation.length - 1]
+    if (ultima) {
+      setSat({
+        num_publicaciones: ultima.num_publicaciones?.toString() ?? '',
+        precio_min: ultima.precio_min?.toString() ?? '',
+        precio_max: ultima.precio_max?.toString() ?? '',
+      })
+    }
     setLoading(false)
     return data
   }, [id, router])
 
   useEffect(() => {
-    fetchProduct().then((data) => {
-      if (data && !data.radar_mx_saturation?.length) {
-        setRefreshing(true)
-        fetch(`/api/refresh/${id}`, { method: 'POST' })
-          .then(() => fetchProduct())
-          .finally(() => setRefreshing(false))
-      }
+    // Carga inicial de datos (patrón estándar de data-fetching en effect).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchProduct()
+  }, [fetchProduct])
+
+  const handleSaveSaturation = async () => {
+    setSavingSat(true)
+    await fetch(`/api/saturation/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        num_publicaciones: sat.num_publicaciones === '' ? null : Number(sat.num_publicaciones),
+        precio_min: sat.precio_min === '' ? null : Number(sat.precio_min),
+        precio_max: sat.precio_max === '' ? null : Number(sat.precio_max),
+      }),
     })
-  }, [fetchProduct, id])
+    await fetchProduct()
+    setSavingSat(false)
+  }
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -113,7 +137,7 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
           <EstadoBadge estado={product.estado} />
           <Button variant="secondary" size="sm" onClick={handleRefresh} loading={refreshing}>
             <RefreshCw size={14} />
-            Refrescar ML
+            Refrescar momentum
           </Button>
           <Button variant="danger" size="sm" onClick={handleDelete} loading={deleting}>
             <Trash2 size={14} />
@@ -149,28 +173,73 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
       </div>
 
       <div className="grid sm:grid-cols-2 gap-6">
-        {/* Saturación ML */}
+        {/* Saturación ML — captura manual */}
         <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-          <h2 className="font-semibold text-gray-900 mb-4">Saturación en Mercado Libre MX</h2>
-          {latestSat ? (
-            <dl className="divide-y divide-gray-50 text-sm">
-              {[
-                ['Publicaciones totales', fmt(latestSat.num_publicaciones)],
-                ['Precio mínimo', fmt(latestSat.precio_min, 0, '$')],
-                ['Precio máximo', fmt(latestSat.precio_max, 0, '$')],
-                ['Precio mediana', fmt(latestSat.precio_mediana, 0, '$')],
-                ['En tendencias MX', latestSat.aparece_en_ml_trends ? '⚠️ Sí (ya saturado)' : '✅ No'],
-                ['Capturado', new Date(latestSat.capturado_at).toLocaleDateString('es-MX')],
-              ].map(([k, v]) => (
-                <div key={String(k)} className="flex justify-between py-2">
-                  <dt className="text-gray-500">{k}</dt>
-                  <dd className="font-medium text-gray-900">{v}</dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            <p className="text-sm text-gray-400">Sin datos. Presiona &ldquo;Refrescar ML&rdquo;.</p>
-          )}
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="font-semibold text-gray-900">Saturación en Mercado Libre MX</h2>
+            {latestSat?.aparece_en_ml_trends && (
+              <span className="text-[11px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                ⚠️ En tendencias MX
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-500 mb-4">
+            ML bloquea la lectura automática. Abre la búsqueda, mira cuántos resultados hay y los
+            precios, y captúralos aquí.
+          </p>
+
+          <a
+            href={`https://listado.mercadolibre.com.mx/${encodeURIComponent(
+              product.keyword_busqueda.trim().toLowerCase().replace(/\s+/g, '-')
+            ).replace(/%2D/g, '-')}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700 mb-4"
+          >
+            <Search size={14} />
+            Buscar &ldquo;{product.keyword_busqueda}&rdquo; en Mercado Libre
+          </a>
+
+          <div className="flex flex-col gap-3">
+            <Input
+              label="Publicaciones (resultados)"
+              type="number"
+              min="0"
+              placeholder="ej. 1240"
+              value={sat.num_publicaciones}
+              onChange={(e) => setSat({ ...sat, num_publicaciones: e.target.value })}
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Precio más bajo"
+                type="number"
+                min="0"
+                placeholder="ej. 180"
+                value={sat.precio_min}
+                onChange={(e) => setSat({ ...sat, precio_min: e.target.value })}
+                leading="$"
+              />
+              <Input
+                label="Precio más alto"
+                type="number"
+                min="0"
+                placeholder="ej. 950"
+                value={sat.precio_max}
+                onChange={(e) => setSat({ ...sat, precio_max: e.target.value })}
+                leading="$"
+              />
+            </div>
+            <Button onClick={handleSaveSaturation} loading={savingSat} className="w-full mt-1">
+              <Save size={14} />
+              Guardar saturación
+            </Button>
+            {latestSat && (
+              <p className="text-xs text-gray-400 text-center">
+                Última captura: {fmt(latestSat.num_publicaciones)} publicaciones ·{' '}
+                {new Date(latestSat.capturado_at).toLocaleDateString('es-MX')}
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Calculadora de margen */}

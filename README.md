@@ -123,11 +123,13 @@ npm test
 
 | Fuente | Qué aporta | Estado | Requiere |
 |---|---|---|---|
-| **Mercado Libre MX** (`/search`) | Saturación (publicaciones, precios) | ✅ Funciona | Nada |
+| **Mercado Libre MX** (saturación: publicaciones + precios) | Competencia y precios en MX | ✍️ Captura manual | Nada — ML devuelve `403` en su API de búsqueda y bloquea el scraping (anti-bot). Se captura a mano en la ficha del producto (botón "Buscar en ML" + 3 campos). |
 | **Google Trends** | Momentum US (pendiente de búsqueda) | ⚠️ Best-effort | Nada — pero Google suele bloquear IPs de servidor (403/429). Si falla, el refresco continúa sin el dato. |
 | **Mercado Libre MX** (`/trends/MLM`) | Sugerencias / tendencia local + flag `aparece_en_ml_trends` | 🔑 Listo | `ML_CLIENT_ID`, `ML_CLIENT_SECRET` |
 | **AliExpress** (hot products) | Descubrimiento automático de productos ganadores | 🔑 Listo | `ALIEXPRESS_APP_KEY`, `ALIEXPRESS_APP_SECRET` |
 
-La página **Descubrir** (`/descubrir`) lista productos sugeridos automáticamente desde AliExpress y las tendencias de ML MX (cuando hay credenciales). El momentum de Google Trends se calcula solo al pulsar "Refrescar" y en el cron semanal.
+La página **Descubrir** (`/descubrir`) lista productos sugeridos automáticamente desde AliExpress y las tendencias de ML MX (cuando hay credenciales). El momentum de Google Trends se calcula solo al pulsar "Refrescar momentum" y en el cron semanal.
+
+> **Saturación MX (manual):** Mercado Libre cerró su API de búsqueda (`/sites/MLM/search` → `403 forbidden`, incluso con token de app) y su sitio público bloquea peticiones de servidor con anti-bot. Por eso el número de publicaciones y los precios se capturan a mano: en la ficha del producto hay un botón que abre la búsqueda de ML en tu dispositivo y campos para anotar lo que ves. El endpoint `POST /api/saturation/[productId]` guarda esos datos y recalcula el score.
 
 > **TikTok y Amazon** siguen siendo captura manual (`/captura`): no permiten acceso automático sin aprobación de sus APIs (TikTok Research API / Amazon PA-API).
