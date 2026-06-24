@@ -108,6 +108,7 @@ export async function POST(
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error desconocido'
+    console.error('[refresh] error:', msg, err instanceof Error ? err.stack : '')
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

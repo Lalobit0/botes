@@ -13,7 +13,10 @@ export async function buscarEnML(keyword: string, accessToken?: string): Promise
   const headers: Record<string, string> = {}
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`
   const res = await fetch(url, { headers })
-  if (!res.ok) throw new Error(`ML search error: ${res.status}`)
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`ML search error: ${res.status} ${body.slice(0, 300)}`)
+  }
 
   const json = await res.json()
   const total: number = json.paging?.total ?? 0
