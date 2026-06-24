@@ -33,9 +33,9 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
   const [estado, setEstado] = useState('nuevo')
   const [notas, setNotas] = useState('')
 
-  const fetchProduct = useCallback(async () => {
+  const fetchProduct = useCallback(async (): Promise<ProductConDetalle | null> => {
     const res = await fetch(`/api/products/${id}`)
-    if (!res.ok) { router.push('/'); return }
+    if (!res.ok) { router.push('/'); return null }
     const data: ProductConDetalle = await res.json()
     setProduct(data)
     setEstado(data.estado)
@@ -44,9 +44,19 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
       setMargin(data.radar_margin_inputs)
     }
     setLoading(false)
+    return data
   }, [id, router])
 
-  useEffect(() => { fetchProduct() }, [fetchProduct])
+  useEffect(() => {
+    fetchProduct().then((data) => {
+      if (data && !data.radar_mx_saturation?.length) {
+        setRefreshing(true)
+        fetch(`/api/refresh/${id}`, { method: 'POST' })
+          .then(() => fetchProduct())
+          .finally(() => setRefreshing(false))
+      }
+    })
+  }, [fetchProduct, id])
 
   const handleRefresh = async () => {
     setRefreshing(true)
