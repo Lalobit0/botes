@@ -27,6 +27,8 @@ export default function CapturaPage() {
   const [product, setProduct] = useState({
     nombre: '', keyword_busqueda: '', nicho: '', categoria: '', notas: '',
   })
+  const [precioUsd, setPrecioUsd] = useState('')
+  const [linkRef, setLinkRef] = useState('')
   const [signal, setSignal] = useState({
     fuente: 'tiktok', tier: 'emergente', rank: '', valor: '',
   })
@@ -37,6 +39,10 @@ export default function CapturaPage() {
     setError('')
 
     try {
+      const notasFinal = [product.notas, linkRef && `Ref: ${linkRef}`]
+        .filter(Boolean)
+        .join(' · ')
+
       const prodRes = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -45,7 +51,7 @@ export default function CapturaPage() {
           keyword_busqueda: product.keyword_busqueda,
           nicho: product.nicho || null,
           categoria: product.categoria || null,
-          notas: product.notas || null,
+          notas: notasFinal || null,
         }),
       })
 
@@ -72,7 +78,16 @@ export default function CapturaPage() {
         })
       }
 
-      // Refrescar ML automáticamente
+      // Si capturó precio de origen, pre-llena la calculadora de margen
+      if (precioUsd) {
+        await fetch(`/api/margin/${prod.id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ precio_origen_usd: parseFloat(precioUsd) }),
+        })
+      }
+
+      // Calcula el momentum automático (Google Trends) en segundo plano
       await fetch(`/api/refresh/${prod.id}`, { method: 'POST' })
 
       router.push(`/producto/${prod.id}`)
@@ -86,45 +101,61 @@ export default function CapturaPage() {
   return (
     <div className="max-w-xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Captura rápida</h1>
-        <p className="text-sm text-gray-500 mt-1">Pega productos que detectas en TikTok o Amazon cada lunes.</p>
+        <h1 className="text-2xl font-bold text-gray-900">Agregar producto específico</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Un producto concreto que ya viste (TikTok, AliExpress, una tienda gringa), no una categoría.
+          Entre más específico, mejor evalúa el radar.
+        </p>
       </div>
 
       <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 flex flex-col gap-5">
         <div className="flex flex-col gap-4">
           <Input
-            label="Nombre del producto"
+            label="Nombre del producto (específico)"
             required
             value={product.nombre}
             onChange={(e) => setProduct({ ...product, nombre: e.target.value })}
-            placeholder="ej. Portavelas de concreto estilo nórdico"
+            placeholder="ej. Mochila antirrobo USB impermeable hombre"
           />
           <Input
-            label="Keyword de búsqueda (ML / buscadores)"
+            label="Keyword exacta para buscar en ML"
             required
             value={product.keyword_busqueda}
             onChange={(e) => setProduct({ ...product, keyword_busqueda: e.target.value })}
-            placeholder="ej. portavelas concreto"
+            placeholder="ej. mochila antirrobo usb impermeable"
           />
+          <p className="-mt-2 text-xs text-gray-400">
+            Tip: usa el modelo/atributos concretos (material, función, marca) — no &ldquo;mochila&rdquo; a secas.
+          </p>
           <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Precio de origen (USD)"
+              type="number"
+              min="0"
+              step="0.01"
+              value={precioUsd}
+              onChange={(e) => setPrecioUsd(e.target.value)}
+              placeholder="ej. 8.50"
+              leading="$"
+            />
             <Select
               label="Nicho"
               value={product.nicho}
               onChange={(e) => setProduct({ ...product, nicho: e.target.value })}
               options={[{ value: '', label: 'Sin nicho' }, ...NICHOS.map((n) => ({ value: n, label: n }))]}
             />
-            <Input
-              label="Categoría"
-              value={product.categoria}
-              onChange={(e) => setProduct({ ...product, categoria: e.target.value })}
-              placeholder="ej. Decoración"
-            />
           </div>
+          <Input
+            label="Link de referencia (AliExpress / TikTok / Amazon)"
+            value={linkRef}
+            onChange={(e) => setLinkRef(e.target.value)}
+            placeholder="https://..."
+          />
           <Input
             label="Notas"
             value={product.notas}
             onChange={(e) => setProduct({ ...product, notas: e.target.value })}
-            placeholder="Observaciones, links, etc."
+            placeholder="Por qué te llamó la atención, etc."
           />
         </div>
 
@@ -183,7 +214,7 @@ export default function CapturaPage() {
 
         <Button type="submit" loading={loading} className="w-full" size="lg">
           <Plus size={16} />
-          Agregar y refrescar ML
+          Agregar y evaluar
         </Button>
       </form>
     </div>
