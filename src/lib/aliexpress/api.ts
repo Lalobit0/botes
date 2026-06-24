@@ -55,8 +55,19 @@ export async function getAliexpressHotProducts(
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(params),
     })
-    if (!res.ok) return []
+    if (!res.ok) {
+      console.warn(`[aliexpress] HTTP ${res.status} al consultar hot products`)
+      return []
+    }
     const json = await res.json()
+
+    // AliExpress reporta errores de firma/permiso dentro de error_response.
+    // Lo más común al estrenar credenciales: el paquete de Affiliate API aún no
+    // está aprobado. Lo dejamos visible en logs para diagnosticar al instante.
+    if (json?.error_response) {
+      console.warn('[aliexpress] error_response:', JSON.stringify(json.error_response))
+      return []
+    }
 
     // La estructura puede variar; navegamos defensivamente.
     const result =
@@ -74,7 +85,8 @@ export async function getAliexpressHotProducts(
         ordenes: p.lastest_volume ? Number(p.lastest_volume) : null,
       })
     )
-  } catch {
+  } catch (err) {
+    console.warn('[aliexpress] excepción al consultar hot products:', err)
     return []
   }
 }
