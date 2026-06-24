@@ -7,9 +7,12 @@ export interface MLSearchResult {
   precioMediana: number | null
 }
 
-export async function buscarEnML(keyword: string): Promise<MLSearchResult> {
+export async function buscarEnML(keyword: string, accessToken?: string): Promise<MLSearchResult> {
   const url = `${ML_BASE}/sites/MLM/search?q=${encodeURIComponent(keyword)}&limit=50`
-  const res = await fetch(url)
+  // ML cerró el acceso anónimo a /search: ahora requiere un token de la app.
+  const headers: Record<string, string> = {}
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+  const res = await fetch(url, { headers })
   if (!res.ok) throw new Error(`ML search error: ${res.status}`)
 
   const json = await res.json()

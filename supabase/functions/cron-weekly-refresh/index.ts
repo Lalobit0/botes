@@ -37,9 +37,12 @@ async function obtenerTendenciasML(token: string): Promise<string[]> {
   } catch { return [] }
 }
 
-async function buscarEnML(keyword: string) {
+async function buscarEnML(keyword: string, token: string | null) {
   const url = `https://api.mercadolibre.com/sites/MLM/search?q=${encodeURIComponent(keyword)}&limit=50`
-  const res = await fetch(url)
+  // ML /search ahora requiere token de la app.
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const res = await fetch(url, { headers })
   const json = await res.json()
   const total: number = json.paging?.total ?? 0
   const precios: number[] = (json.results ?? [])
@@ -145,7 +148,7 @@ Deno.serve(async () => {
   let procesados = 0
   for (const product of products) {
     try {
-      const mlResult = await buscarEnML(product.keyword_busqueda)
+      const mlResult = await buscarEnML(product.keyword_busqueda, token)
       const aparece_en_ml_trends = tendencias.some((t) =>
         t.includes(product.keyword_busqueda.toLowerCase())
       )

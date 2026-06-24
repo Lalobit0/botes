@@ -22,12 +22,19 @@ export async function POST(
   }
 
   try {
-    const mlResult = await buscarEnML(product.keyword_busqueda)
-
-    let aparece_en_ml_trends = false
+    // ML /search ahora requiere token de la app. Lo obtenemos una sola vez.
+    let token: string | null = null
     if (process.env.ML_CLIENT_ID && process.env.ML_CLIENT_SECRET) {
       try {
-        const token = await obtenerAccessToken()
+        token = await obtenerAccessToken()
+      } catch {}
+    }
+
+    const mlResult = await buscarEnML(product.keyword_busqueda, token ?? undefined)
+
+    let aparece_en_ml_trends = false
+    if (token) {
+      try {
         const tendencias = await obtenerTendenciasML(token)
         aparece_en_ml_trends = tendencias.some((t) =>
           t.includes(product.keyword_busqueda.toLowerCase())
