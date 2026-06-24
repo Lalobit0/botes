@@ -22,7 +22,6 @@ export async function buscarEnML(keyword: string): Promise<MLSearchResult> {
       Accept: 'text/html,application/xhtml+xml',
     },
   })
-  if (!res.ok) throw new Error(`ML listado error: ${res.status}`)
   const html = await res.text()
 
   // Número de publicaciones: "1.234 resultados" (MX usa . como separador de miles)
@@ -40,7 +39,15 @@ export async function buscarEnML(keyword: string): Promise<MLSearchResult> {
   }
   precios.sort((a, b) => a - b)
 
-  console.log(`[buscarEnML] "${keyword}" → ${numPublicaciones} publicaciones, ${precios.length} precios`)
+  // Diagnóstico: qué nos devolvió realmente ML al server de Vercel
+  const titleMatch = html.match(/<title>([^<]*)<\/title>/i)
+  console.log(
+    `[buscarEnML] "${keyword}" url=${url} status=${res.status} len=${html.length} ` +
+    `pub=${numPublicaciones} precios=${precios.length} ` +
+    `has_resultados=${/resultados/i.test(html)} has_money=${/andes-money-amount/.test(html)} ` +
+    `captcha=${/captcha|robot|verifica que eres|challenge/i.test(html)} ` +
+    `title="${titleMatch?.[1]?.slice(0, 80) ?? ''}"`
+  )
 
   return {
     numPublicaciones,
