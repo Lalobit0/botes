@@ -22,19 +22,27 @@ export async function POST(
   }
 
   try {
-    // ML /search ahora requiere token de la app. Lo obtenemos una sola vez.
-    let token: string | null = null
-    if (process.env.ML_CLIENT_ID && process.env.ML_CLIENT_SECRET) {
-      try {
-        token = await obtenerAccessToken()
-      } catch {}
+    // Saturación desde el sitio público de ML (la API /search da 403). Resiliente:
+    // si falla, seguimos con Google Trends + margen en vez de tirar todo en 500.
+    let mlResult: Awaited<ReturnType<typeof buscarEnML>> = {
+      numPublicaciones: 0,
+      precioMin: null,
+      precioMax: null,
+      precioMediana: null,
+    }
+    let mlOk = false
+    try {
+      mlResult = await buscarEnML(product.keyword_busqueda)
+      mlOk = true
+    } catch (e) {
+      console.error('[refresh] saturación ML falló:', e instanceof Error ? e.message : e)
     }
 
-    const mlResult = await buscarEnML(product.keyword_busqueda, token ?? undefined)
-
+    // Tendencias locales (esto sí funciona con token de app)
     let aparece_en_ml_trends = false
-    if (token) {
+    if (process.env.ML_CLIENT_ID && process.env.ML_CLIENT_SECRET) {
       try {
+        const token = await obtenerAccessToken()
         const tendencias = await obtenerTendenciasML(token)
         aparece_en_ml_trends = tendencias.some((t) =>
           t.includes(product.keyword_busqueda.toLowerCase())
@@ -42,16 +50,17 @@ export async function POST(
       } catch {}
     }
 
-    const { error: satError } = await supabase.from('radar_mx_saturation').insert({
-      product_id: productId,
-      num_publicaciones: mlResult.numPublicaciones,
-      precio_min: mlResult.precioMin,
-      precio_max: mlResult.precioMax,
-      precio_mediana: mlResult.precioMediana,
-      aparece_en_ml_trends,
-    })
-
-    if (satError) throw new Error(satError.message)
+    if (mlOk) {
+      const { error: satError } = await supabase.from('radar_mx_saturation').insert({
+        product_id: productId,
+        num_publicaciones: mlResult.numPublicaciones,
+        precio_min: mlResult.precioMin,
+        precio_max: mlResult.precioMax,
+        precio_mediana: mlResult.precioMediana,
+        aparece_en_ml_trends,
+      })
+      if (satError) throw new Error(satError.message)
+    }
 
     // Momentum automático desde Google Trends (US). Reemplaza la señal anterior.
     let googleScore: number | null = null

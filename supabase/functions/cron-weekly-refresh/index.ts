@@ -37,18 +37,31 @@ async function obtenerTendenciasML(token: string): Promise<string[]> {
   } catch { return [] }
 }
 
-async function buscarEnML(keyword: string, token: string | null) {
-  const url = `https://api.mercadolibre.com/sites/MLM/search?q=${encodeURIComponent(keyword)}&limit=50`
-  // ML /search ahora requiere token de la app.
-  const headers: Record<string, string> = {}
-  if (token) headers.Authorization = `Bearer ${token}`
-  const res = await fetch(url, { headers })
-  const json = await res.json()
-  const total: number = json.paging?.total ?? 0
-  const precios: number[] = (json.results ?? [])
-    .map((r: { price?: number }) => r.price)
-    .filter((p: unknown): p is number => typeof p === 'number' && p > 0)
-    .sort((a: number, b: number) => a - b)
+// ML /sites/search devuelve 403 incluso con token de app. Leemos el sitio
+// público de listados (sin auth) y parseamos publicaciones + precios.
+async function buscarEnML(keyword: string) {
+  const slug = keyword.trim().toLowerCase().replace(/\s+/g, '-')
+  const url = `https://listado.mercadolibre.com.mx/${encodeURIComponent(slug).replace(/%2D/g, '-')}`
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'es-MX,es;q=0.9',
+    },
+  })
+  const html = await res.text()
+
+  let total = 0
+  const qty = html.match(/([\d.,]+)\s*resultados/i)
+  if (qty) total = parseInt(qty[1].replace(/[.,]/g, ''), 10) || 0
+
+  const precios: number[] = []
+  const re = /andes-money-amount__fraction[^>]*>\s*([\d.,]+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html)) !== null) {
+    const n = parseInt(m[1].replace(/[.,]/g, ''), 10)
+    if (n > 0) precios.push(n)
+  }
+  precios.sort((a, b) => a - b)
 
   const mid = Math.floor(precios.length / 2)
   const mediana = precios.length === 0 ? null
@@ -148,7 +161,7 @@ Deno.serve(async () => {
   let procesados = 0
   for (const product of products) {
     try {
-      const mlResult = await buscarEnML(product.keyword_busqueda, token)
+      const mlResult = await buscarEnML(product.keyword_busqueda)
       const aparece_en_ml_trends = tendencias.some((t) =>
         t.includes(product.keyword_busqueda.toLowerCase())
       )

@@ -7,27 +7,43 @@ export interface MLSearchResult {
   precioMediana: number | null
 }
 
-export async function buscarEnML(keyword: string, accessToken?: string): Promise<MLSearchResult> {
-  const url = `${ML_BASE}/sites/MLM/search?q=${encodeURIComponent(keyword)}&limit=50`
-  // ML cerró el acceso anónimo a /search: ahora requiere un token de la app.
-  const headers: Record<string, string> = {}
-  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
-  const res = await fetch(url, { headers })
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`ML search error: ${res.status} ${body.slice(0, 300)}`)
+// ML cerró su API de búsqueda: GET /sites/MLM/search devuelve 403 "forbidden"
+// incluso con un token de app (client_credentials). Como alternativa leemos el
+// sitio público de listados (listado.mercadolibre.com.mx), que no requiere auth,
+// y extraemos el número de publicaciones y los precios visibles.
+export async function buscarEnML(keyword: string): Promise<MLSearchResult> {
+  const slug = keyword.trim().toLowerCase().replace(/\s+/g, '-')
+  const url = `https://listado.mercadolibre.com.mx/${encodeURIComponent(slug).replace(/%2D/g, '-')}`
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'es-MX,es;q=0.9',
+      Accept: 'text/html,application/xhtml+xml',
+    },
+  })
+  if (!res.ok) throw new Error(`ML listado error: ${res.status}`)
+  const html = await res.text()
+
+  // Número de publicaciones: "1.234 resultados" (MX usa . como separador de miles)
+  let numPublicaciones = 0
+  const qty = html.match(/([\d.,]+)\s*resultados/i)
+  if (qty) numPublicaciones = parseInt(qty[1].replace(/[.,]/g, ''), 10) || 0
+
+  // Precios visibles: spans andes-money-amount__fraction (parte entera del precio)
+  const precios: number[] = []
+  const re = /andes-money-amount__fraction[^>]*>\s*([\d.,]+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html)) !== null) {
+    const n = parseInt(m[1].replace(/[.,]/g, ''), 10)
+    if (n > 0) precios.push(n)
   }
-
-  const json = await res.json()
-  const total: number = json.paging?.total ?? 0
-  const precios: number[] = (json.results ?? [])
-    .map((r: { price?: number }) => r.price)
-    .filter((p: unknown): p is number => typeof p === 'number' && p > 0)
-
   precios.sort((a, b) => a - b)
 
+  console.log(`[buscarEnML] "${keyword}" → ${numPublicaciones} publicaciones, ${precios.length} precios`)
+
   return {
-    numPublicaciones: total,
+    numPublicaciones,
     precioMin: precios[0] ?? null,
     precioMax: precios[precios.length - 1] ?? null,
     precioMediana: calcularMediana(precios),
