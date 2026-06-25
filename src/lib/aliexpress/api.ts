@@ -7,6 +7,7 @@ import crypto from 'crypto'
 const GATEWAY = 'https://api-sg.aliexpress.com/sync'
 
 export interface AliexpressProduct {
+  productoId: string | null
   nombre: string
   keyword: string
   precioUsd: number | null
@@ -54,6 +55,12 @@ const PRODUCT_FIELDS = [
   'product_detail_url',
   'first_level_category_name',
   'second_level_category_name',
+].join(',')
+
+const DETALLE_FIELDS = [
+  ...PRODUCT_FIELDS.split(','),
+  'product_small_image_urls',
+  'product_props',
 ].join(',')
 
 // Mapa nicho (es) → keyword de búsqueda (en, que es como responde mejor la API).
@@ -142,6 +149,7 @@ function mapearProductos(products: unknown): AliexpressProduct[] {
         ? Math.round(((original - precio) / original) * 100)
         : null
     return {
+      productoId: p.product_id != null ? String(p.product_id) : null,
       nombre: String(p.product_title ?? 'Producto AliExpress'),
       keyword: String(p.product_title ?? '').split(' ').slice(0, 4).join(' '),
       precioUsd: precio,
@@ -220,6 +228,61 @@ export async function getProductosPromo(
   })
   if (!json) return []
   return extraerProductos(json, 'aliexpress_affiliate_featuredpromo_products_get_response')
+}
+
+export interface AliexpressProductDetalle extends AliexpressProduct {
+  imagenesExtras: string[]
+  atributos: { nombre: string; valor: string }[]
+}
+
+// Detalle completo de un producto: multi-imagen, specs, datos de seller.
+export async function getProductoDetalle(productId: string): Promise<AliexpressProductDetalle | null> {
+  if (!aliexpressConfigurado()) return null
+  const json = await llamarAli('aliexpress.affiliate.productdetail.get', {
+    product_ids: productId,
+    fields: DETALLE_FIELDS,
+  })
+  if (!json) return null
+
+  const wrapper = get(json, 'aliexpress_affiliate_productdetail_get_response') ?? json
+  const result = get(get(wrapper, 'resp_result'), 'result')
+  const holder = get(result, 'products')
+  const raws: unknown[] = Array.isArray(holder)
+    ? holder
+    : Array.isArray(get(holder, 'product'))
+      ? (get(holder, 'product') as unknown[])
+      : []
+  if (!raws.length) return null
+
+  const raw = raws[0] as Record<string, unknown>
+  const [base] = mapearProductos([raw])
+
+  const smallRaw = get(raw, 'product_small_image_urls')
+  let imagenesExtras: string[] = []
+  if (Array.isArray(smallRaw)) {
+    imagenesExtras = smallRaw as string[]
+  } else if (smallRaw && typeof smallRaw === 'object') {
+    const arr = get(smallRaw, 'string')
+    if (Array.isArray(arr)) imagenesExtras = arr as string[]
+  }
+
+  const propsRaw = get(raw, 'product_props')
+  let propsList: Record<string, unknown>[] = []
+  if (Array.isArray(propsRaw)) {
+    propsList = propsRaw as Record<string, unknown>[]
+  } else if (propsRaw && typeof propsRaw === 'object') {
+    const inner = get(propsRaw, 'product_prop')
+    if (Array.isArray(inner)) propsList = inner as Record<string, unknown>[]
+  }
+  const atributos = propsList
+    .slice(0, 8)
+    .map((attr) => ({
+      nombre: String(attr.prop_name ?? attr.attrName ?? ''),
+      valor: String(attr.prop_value ?? attr.attrValue ?? ''),
+    }))
+    .filter((a) => a.nombre)
+
+  return { ...base, imagenesExtras, atributos }
 }
 
 // Búsqueda de productos (ordenable por ventas/precio, filtrable por país de envío).

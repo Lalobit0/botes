@@ -1,9 +1,10 @@
 'use client'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
-import { Search, Plus, ExternalLink, Check, Radar } from 'lucide-react'
+import { Search, Plus, ExternalLink, Check, Radar, X, ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface Producto {
+  productoId: string | null
   nombre: string
   keyword: string
   precioUsd: number | null
@@ -106,6 +107,11 @@ export default function DescubrirPage() {
   const [added, setAdded] = useState<Set<string>>(new Set())
   const [adding, setAdding] = useState<string | null>(null)
 
+  const [modalProducto, setModalProducto] = useState<Producto | null>(null)
+  const [detalle, setDetalle] = useState<{ imagenesExtras: string[]; atributos: { nombre: string; valor: string }[] } | null>(null)
+  const [loadingDetalle, setLoadingDetalle] = useState(false)
+  const [imgIdx, setImgIdx] = useState(0)
+
   const fetchProductos = useCallback(
     async (o: {
       q: string
@@ -150,6 +156,37 @@ export default function DescubrirPage() {
     },
     []
   )
+
+  const abrirModal = useCallback(async (p: Producto) => {
+    setModalProducto(p)
+    setDetalle(null)
+    setImgIdx(0)
+    if (!p.productoId) return
+    setLoadingDetalle(true)
+    try {
+      const res = await fetch(`/api/discover/detalle?id=${encodeURIComponent(p.productoId)}`)
+      if (res.ok) {
+        const data = await res.json()
+        setDetalle({ imagenesExtras: data.imagenesExtras ?? [], atributos: data.atributos ?? [] })
+      }
+    } catch {}
+    finally {
+      setLoadingDetalle(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setModalProducto(null); setDetalle(null) }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [])
+
+  useEffect(() => {
+    document.body.style.overflow = modalProducto ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
+  }, [modalProducto])
 
   // Carga inicial (diferida para no setear estado de forma síncrona en el efecto).
   useEffect(() => {
@@ -547,7 +584,10 @@ export default function DescubrirPage() {
                   key={`${key}-${i}`}
                   className="group bg-white rounded-2xl border border-gray-200 overflow-hidden hover:shadow-lg hover:border-indigo-200 transition-all flex flex-col"
                 >
-                  <div className="relative aspect-square bg-gray-50 overflow-hidden">
+                  <div
+                    className="relative aspect-square bg-gray-50 overflow-hidden cursor-pointer"
+                    onClick={() => abrirModal(p)}
+                  >
                     {p.imagen ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -683,6 +723,202 @@ export default function DescubrirPage() {
           )}
         </>
       )}
+      {/* Modal de detalle */}
+      {modalProducto && (() => {
+        const mp = modalProducto
+        const est = estimar(mp)
+        const usaApp = mp.precioAppUsd != null && mp.precioAppUsd < (mp.precioUsd ?? Infinity)
+        const mkey = mp.url ?? mp.nombre
+        const isAdded = added.has(mkey)
+        const imagenes = [
+          mp.imagen,
+          ...(detalle?.imagenesExtras.filter((u) => u !== mp.imagen) ?? []),
+        ].filter(Boolean) as string[]
+        const clampedIdx = Math.min(imgIdx, Math.max(0, imagenes.length - 1))
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4"
+            onClick={() => { setModalProducto(null); setDetalle(null) }}
+          >
+            <div
+              className="bg-white rounded-t-3xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 pt-4 pb-2 sticky top-0 bg-white z-10 border-b border-gray-100">
+                <span className="text-xs text-indigo-500 font-semibold uppercase tracking-wide truncate pr-2">
+                  {mp.categoria ?? 'AliExpress'}
+                </span>
+                <button
+                  onClick={() => { setModalProducto(null); setDetalle(null) }}
+                  className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 shrink-0"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Galería */}
+              <div className="relative bg-gray-50" style={{ aspectRatio: '4/3' }}>
+                {imagenes.length > 0 ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={imagenes[clampedIdx]}
+                      alt={mp.nombre}
+                      className="w-full h-full object-contain"
+                    />
+                    {imagenes.length > 1 && (
+                      <>
+                        <button
+                          onClick={() => setImgIdx((i) => (i - 1 + imagenes.length) % imagenes.length)}
+                          className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/30 hover:bg-black/50 text-white rounded-full p-1.5 transition-colors"
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
+                        <button
+                          onClick={() => setImgIdx((i) => (i + 1) % imagenes.length)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/30 hover:bg-black/50 text-white rounded-full p-1.5 transition-colors"
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                        <div className="absolute bottom-2 inset-x-0 flex justify-center gap-1">
+                          {imagenes.map((_, ii) => (
+                            <button
+                              key={ii}
+                              onClick={() => setImgIdx(ii)}
+                              className={`h-1.5 rounded-full transition-all ${ii === clampedIdx ? 'w-4 bg-white' : 'w-1.5 bg-white/50 hover:bg-white/75'}`}
+                            />
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {loadingDetalle && (
+                      <div className="absolute top-2 right-2 bg-black/30 text-white text-[10px] px-2 py-0.5 rounded-full backdrop-blur-sm">
+                        cargando…
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <Radar size={48} className="text-indigo-100" />
+                  </div>
+                )}
+              </div>
+
+              {/* Contenido */}
+              <div className="p-4 space-y-4">
+                <h2 className="text-base font-semibold text-gray-900 leading-snug">
+                  {mp.nombre}
+                </h2>
+
+                {/* Precios */}
+                <div className="flex items-end gap-2 flex-wrap">
+                  <span className="text-2xl font-bold text-gray-900">
+                    ${est ? est.precio.toFixed(2) : '—'}
+                  </span>
+                  <span className="text-sm text-gray-400 mb-0.5">USD</span>
+                  {usaApp && (
+                    <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5 mb-0.5">
+                      precio app
+                    </span>
+                  )}
+                  {mp.precioOriginalUsd && mp.descuentoPct ? (
+                    <>
+                      <span className="text-sm text-gray-400 line-through mb-0.5">
+                        ${mp.precioOriginalUsd.toFixed(2)}
+                      </span>
+                      <span className="text-sm font-bold text-rose-500 mb-0.5">
+                        -{mp.descuentoPct}%
+                      </span>
+                    </>
+                  ) : null}
+                </div>
+
+                {/* Caja de ganancia */}
+                {est && (
+                  <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-3 space-y-1">
+                    <div className="flex items-center justify-between text-xs text-gray-500">
+                      <span>Costo en MX ({markup}×)</span>
+                      <span className="font-medium text-gray-700">${fmtMoney(est.costo)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">Precio de venta sugerido</span>
+                      <span className="font-semibold text-gray-900">≈ ${fmtMoney(est.sell)}</span>
+                    </div>
+                    {est.comisionMxn > 0 && (
+                      <div className="flex items-center justify-between text-xs text-indigo-600">
+                        <span>+ comisión afiliado ({mp.comisionPct}%)</span>
+                        <span>≈ +${fmtMoney(est.comisionMxn)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between text-sm font-bold text-emerald-800 border-t border-emerald-100 pt-1.5 mt-0.5">
+                      <span>Ganancia estimada / pieza</span>
+                      <span>≈ ${fmtMoney(est.ganancia)}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Stats */}
+                <div className="flex flex-wrap gap-3 text-sm text-gray-600">
+                  {mp.ordenes != null && <span>📦 {fmt(mp.ordenes)} vendidos</span>}
+                  {mp.rating != null && <span>★ {mp.rating.toFixed(0)}% positivos</span>}
+                  {mp.comisionPct != null && mp.comisionPct > 0 && (
+                    <span className="text-indigo-600 font-medium">
+                      💸 {mp.comisionPct}% comisión
+                    </span>
+                  )}
+                </div>
+
+                {/* Especificaciones */}
+                {detalle?.atributos && detalle.atributos.length > 0 && (
+                  <div className="border border-gray-100 rounded-xl overflow-hidden">
+                    <div className="px-3 py-2 bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      Especificaciones
+                    </div>
+                    <div className="divide-y divide-gray-100">
+                      {detalle.atributos.map((a, i) => (
+                        <div key={i} className="flex items-start gap-2 px-3 py-2 text-xs">
+                          <span className="text-gray-500 min-w-[110px] shrink-0">{a.nombre}</span>
+                          <span className="text-gray-800 font-medium">{a.valor}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Acciones */}
+                <div className="flex gap-2 pb-2">
+                  {isAdded ? (
+                    <span className="flex-1 inline-flex items-center justify-center gap-1.5 text-sm text-emerald-600 font-medium bg-emerald-50 rounded-xl py-2.5">
+                      <Check size={16} /> Agregado al Radar
+                    </span>
+                  ) : (
+                    <Button
+                      size="md"
+                      onClick={() => { agregar(mp); setModalProducto(null); setDetalle(null) }}
+                      loading={adding === mkey}
+                      className="flex-1"
+                    >
+                      <Plus size={15} /> Evaluar producto
+                    </Button>
+                  )}
+                  {mp.url && (
+                    <a
+                      href={mp.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-4 text-sm text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors"
+                    >
+                      <ExternalLink size={15} /> AliExpress
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
