@@ -56,8 +56,17 @@ const PAISES = [
   { value: 'CL', label: '🇨🇱 Chile' },
 ]
 
+const MARKUPS = [
+  { value: 2, label: '2× (margen 50%)' },
+  { value: 2.5, label: '2.5× (60%)' },
+  { value: 3, label: '3× (67%)' },
+  { value: 3.5, label: '3.5× (71%)' },
+  { value: 4, label: '4× (75%)' },
+]
+
 const PAGE_SIZE = 24
 const fmt = (n: number) => n.toLocaleString('es-MX')
+const fmtMoney = (n: number) => n.toLocaleString('es-MX', { maximumFractionDigits: 0 })
 
 export default function DescubrirPage() {
   const [text, setText] = useState('')
@@ -66,6 +75,8 @@ export default function DescubrirPage() {
   const [sort, setSort] = useState('LAST_VOLUME_DESC')
   const [country, setCountry] = useState('MX')
   const [page, setPage] = useState(1)
+  const [fx, setFx] = useState(18.5)
+  const [markup, setMarkup] = useState(3)
 
   const [productos, setProductos] = useState<Producto[]>([])
   const [tendencias, setTendencias] = useState<string[]>([])
@@ -180,6 +191,13 @@ export default function DescubrirPage() {
       ? `${NICHOS.find((n) => n.value === nicho)?.label ?? nicho} · más vendidos`
       : 'Productos ganadores · más vendidos'
 
+  // Estimación rápida de ganancia en MX desde el precio de compra (USD).
+  const estimar = (precioUsd: number) => {
+    const costo = precioUsd * fx
+    const sell = costo * markup
+    return { costo, sell, margenPct: sell > 0 ? Math.round(((sell - costo) / sell) * 100) : 0 }
+  }
+
   return (
     <div className="max-w-6xl mx-auto">
       {/* Encabezado */}
@@ -285,6 +303,37 @@ export default function DescubrirPage() {
             ))}
           </select>
         </div>
+
+        {/* Ganancia estimada: controles */}
+        <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+          <span className="text-xs font-medium text-gray-600">💰 Ganancia estimada en MX:</span>
+          <label className="inline-flex items-center gap-1.5 text-xs text-gray-600">
+            Tipo de cambio
+            <input
+              type="number"
+              step="0.1"
+              min="1"
+              value={fx}
+              onChange={(e) => setFx(Number(e.target.value) || 0)}
+              className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </label>
+          <select
+            value={markup}
+            onChange={(e) => setMarkup(Number(e.target.value))}
+            className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            {MARKUPS.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <p className="w-full text-[11px] text-gray-400">
+            Estimación rápida sobre el precio de compra (no incluye envío ni aduana). Afina cada
+            producto al darle “Evaluar”.
+          </p>
+        </div>
       </div>
 
       {/* Tendencias de Mercado Libre MX como chips de búsqueda */}
@@ -341,6 +390,7 @@ export default function DescubrirPage() {
               const key = p.url ?? p.nombre
               const isAdded = added.has(key)
               const ganador = (p.ordenes ?? 0) >= 5000
+              const est = p.precioUsd != null ? estimar(p.precioUsd) : null
               return (
                 <div
                   key={`${key}-${i}`}
@@ -398,6 +448,19 @@ export default function DescubrirPage() {
                       {p.ordenes != null && <span>📦 {fmt(p.ordenes)} vendidos</span>}
                       {p.rating != null && <span>★ {p.rating.toFixed(0)}%</span>}
                     </div>
+
+                    {est && (
+                      <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-2.5 py-1.5">
+                        <div className="flex items-center justify-between text-[11px] text-gray-500">
+                          <span>Costo puesto en MX</span>
+                          <span className="font-medium text-gray-700">${fmtMoney(est.costo)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs font-semibold text-emerald-700 mt-0.5">
+                          <span>Vende ≈ ${fmtMoney(est.sell)}</span>
+                          <span className="bg-emerald-100 rounded px-1.5 py-0.5">+{est.margenPct}%</span>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="mt-auto flex items-center gap-2 pt-2">
                       {isAdded ? (
