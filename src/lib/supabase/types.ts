@@ -17,6 +17,7 @@ export interface Database {
           notas: string | null
           estado: ProductEstado
           created_at: string
+          imagen_url: string | null
         }
         Insert: {
           id?: string
@@ -27,6 +28,7 @@ export interface Database {
           notas?: string | null
           estado?: ProductEstado
           created_at?: string
+          imagen_url?: string | null
         }
         Update: {
           nombre?: string
@@ -35,6 +37,7 @@ export interface Database {
           nicho?: string | null
           notas?: string | null
           estado?: ProductEstado
+          imagen_url?: string | null
         }
         Relationships: []
       }

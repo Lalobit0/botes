@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Search, Plus, ExternalLink, Check, Radar, X, ChevronLeft, ChevronRight } from 'lucide-react'
 
@@ -96,6 +96,10 @@ export default function DescubrirPage() {
   const [added, setAdded] = useState<Set<string>>(new Set())
   const [adding, setAdding] = useState<string | null>(null)
 
+  const [satMxCount, setSatMxCount] = useState<number | null | undefined>(undefined)
+  const [satMxLoading, setSatMxLoading] = useState(false)
+  const satMxKwRef = useRef('')
+
   const [modalProducto, setModalProducto] = useState<Producto | null>(null)
   const [detalle, setDetalle] = useState<{ imagenesExtras: string[]; atributos: { nombre: string; valor: string }[] } | null>(null)
   const [loadingDetalle, setLoadingDetalle] = useState(false)
@@ -133,6 +137,7 @@ export default function DescubrirPage() {
         if (o.chips && data.tendenciasMx?.length) setTendencias(data.tendenciasMx)
         setHasMore((data.productos?.length ?? 0) >= PAGE_SIZE)
         setProductos((prev) => (o.append ? [...prev, ...data.productos] : data.productos))
+        if (!o.append) { setSatMxCount(undefined); satMxKwRef.current = '' }
       } catch {
         if (!o.append) setProductos([])
       } finally {
@@ -181,6 +186,21 @@ export default function DescubrirPage() {
     }, 0)
     return () => clearTimeout(id)
   }, [fetchProductos])
+
+  // Consulta saturación en ML MX para la keyword actual (1 llamada por búsqueda).
+  useEffect(() => {
+    if (productos.length === 0) return
+    const kw = productos[0]?.keyword
+    if (!kw || kw === satMxKwRef.current) return
+    satMxKwRef.current = kw
+    setSatMxLoading(true)
+    setSatMxCount(undefined)
+    fetch(`/api/saturation/quick?q=${encodeURIComponent(kw)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setSatMxCount(d?.ok ? (d.total as number) : null))
+      .catch(() => setSatMxCount(null))
+      .finally(() => setSatMxLoading(false))
+  }, [productos])
 
   // Reaplica con el estado actual (siempre vuelve a página 1).
   const aplicar = (over: Partial<Parameters<typeof fetchProductos>[0]> = {}) => {
@@ -483,7 +503,26 @@ export default function DescubrirPage() {
         </div>
       )}
 
-      <p className="text-sm text-gray-500 mb-3">{contexto}</p>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-sm text-gray-500">{contexto}</p>
+        {satMxLoading && (
+          <span className="text-xs text-gray-400 animate-pulse">Consultando ML MX…</span>
+        )}
+        {!satMxLoading && satMxCount != null && (
+          <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full border ${
+            satMxCount < 300
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+              : satMxCount < 1000
+              ? 'bg-amber-50 border-amber-200 text-amber-700'
+              : 'bg-red-50 border-red-200 text-red-700'
+          }`}>
+            🇲🇽 {satMxCount.toLocaleString('es-MX')} en ML MX
+            <span className="opacity-70">
+              {satMxCount < 300 ? '· poco saturado' : satMxCount < 1000 ? '· saturación media' : '· muy saturado'}
+            </span>
+          </span>
+        )}
+      </div>
 
       {/* Resultados */}
       {loading ? (
@@ -807,6 +846,24 @@ export default function DescubrirPage() {
                     </span>
                   )}
                 </div>
+
+                {/* Saturación MX */}
+                {satMxCount != null && (
+                  <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-xl border ${
+                    satMxCount < 300
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                      : satMxCount < 1000
+                      ? 'bg-amber-50 border-amber-200 text-amber-700'
+                      : 'bg-red-50 border-red-200 text-red-700'
+                  }`}>
+                    <span className="text-base">🇲🇽</span>
+                    <span>
+                      <span className="font-bold">{satMxCount.toLocaleString('es-MX')}</span> publicaciones en Mercado Libre MX
+                      {' — '}
+                      {satMxCount < 300 ? 'poca competencia' : satMxCount < 1000 ? 'competencia media' : 'mercado saturado'}
+                    </span>
+                  </div>
+                )}
 
                 {/* Especificaciones */}
                 {detalle?.atributos && detalle.atributos.length > 0 && (

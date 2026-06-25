@@ -68,6 +68,7 @@ export async function POST(request: Request) {
       nombre: body.nombre,
       keyword_busqueda: body.keyword,
       notas: body.url ? `AliExpress — ${body.url}` : 'AliExpress',
+      imagen_url: body.imagen ?? null,
     })
     .select()
     .single()
