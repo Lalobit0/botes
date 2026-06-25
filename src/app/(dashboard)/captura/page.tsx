@@ -28,6 +28,7 @@ export default function CapturaPage() {
     nombre: '', keyword_busqueda: '', nicho: '', categoria: '', notas: '',
   })
   const [precioUsd, setPrecioUsd] = useState('')
+  const [imagenUrl, setImagenUrl] = useState('')
   const [linkRef, setLinkRef] = useState('')
   const [signal, setSignal] = useState({
     fuente: 'tiktok', tier: 'emergente', rank: '', valor: '',
@@ -52,6 +53,7 @@ export default function CapturaPage() {
           nicho: product.nicho || null,
           categoria: product.categoria || null,
           notas: notasFinal || null,
+          imagen_url: imagenUrl || null,
         }),
       })
 
@@ -145,6 +147,12 @@ export default function CapturaPage() {
               options={[{ value: '', label: 'Sin nicho' }, ...NICHOS.map((n) => ({ value: n, label: n }))]}
             />
           </div>
+          <Input
+            label="Imagen del producto (URL opcional)"
+            value={imagenUrl}
+            onChange={(e) => setImagenUrl(e.target.value)}
+            placeholder="https://..."
+          />
           <Input
             label="Link de referencia (AliExpress / TikTok / Amazon)"
             value={linkRef}

@@ -2,6 +2,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { OpportunidadesTable } from '@/components/dashboard/OpportunidadesTable'
 import { Select } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
+import { RefreshCw } from 'lucide-react'
 
 type Row = Parameters<typeof OpportunidadesTable>[0]['rows'][number]
 
@@ -11,6 +13,7 @@ const ESTADOS = ['', 'nuevo', 'investigando', 'comprado', 'descartado']
 export default function DashboardPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshingAll, setRefreshingAll] = useState(false)
   const [nicho, setNicho] = useState('')
   const [estado, setEstado] = useState('')
 
@@ -33,6 +36,13 @@ export default function DashboardPage() {
     await fetchData()
   }
 
+  const handleRefreshAll = async () => {
+    setRefreshingAll(true)
+    await Promise.all(rows.map((r) => fetch(`/api/refresh/${r.id}`, { method: 'POST' })))
+    await fetchData()
+    setRefreshingAll(false)
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
@@ -53,6 +63,12 @@ export default function DashboardPage() {
             options={ESTADOS.map((s) => ({ value: s, label: s || 'Todos los estados' }))}
             className="w-44"
           />
+          {rows.length > 0 && (
+            <Button variant="secondary" size="sm" onClick={handleRefreshAll} loading={refreshingAll} title="Refrescar momentum de todos los productos">
+              <RefreshCw size={14} />
+              {refreshingAll ? 'Refrescando…' : 'Refrescar todo'}
+            </Button>
+          )}
         </div>
       </div>
 

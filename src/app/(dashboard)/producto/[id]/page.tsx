@@ -2,11 +2,27 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
-import { Input, Select } from '@/components/ui/Input'
+import { Input } from '@/components/ui/Input'
 import { ScoreBadge, EstadoBadge } from '@/components/ui/Badge'
+import { Toast } from '@/components/ui/Toast'
 import { RefreshCw, ChevronLeft, Save, Trash2, Search, Pencil, Check, X } from 'lucide-react'
 import type { ProductConDetalle, MarginInputs } from '@/lib/supabase/types'
 import Link from 'next/link'
+
+function haceRelativo(fecha: string): string {
+  const ms = Date.now() - new Date(fecha).getTime()
+  const min = Math.floor(ms / 60000)
+  if (min < 1) return 'hace un momento'
+  if (min < 60) return `hace ${min} min`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `hace ${h} h`
+  const d = Math.floor(h / 24)
+  if (d === 1) return 'ayer'
+  if (d < 30) return `hace ${d} días`
+  const m = Math.floor(d / 30)
+  if (m < 12) return `hace ${m} mes${m > 1 ? 'es' : ''}`
+  return `hace ${Math.floor(m / 12)} año${Math.floor(m / 12) > 1 ? 's' : ''}`
+}
 
 const ESTADOS = ['nuevo', 'investigando', 'comprado', 'descartado']
 
@@ -37,6 +53,9 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
   const [satMLError, setSatMLError] = useState(false)
   const satAutoFetchedRef = useRef(false)
   const gtAutoFetchedRef = useRef(false)
+
+  const [toast, setToast] = useState<{ message: string; ok: boolean } | null>(null)
+  const showToast = useCallback((message: string, ok = true) => setToast({ message, ok }), [])
 
   const [amazon, setAmazon] = useState<{ resultados: string; precioUsd: string; bsr: string }>({
     resultados: '',
@@ -169,63 +188,83 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
 
   const handleSaveAmazon = async () => {
     setSavingAmazon(true)
-    await fetch(`/api/amazon/${id}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        resultados: amazon.resultados === '' ? null : Number(amazon.resultados),
-        precioUsd: amazon.precioUsd === '' ? null : Number(amazon.precioUsd),
-        bsr: amazon.bsr === '' ? null : Number(amazon.bsr),
-      }),
-    })
-    await fetchProduct()
-    setSavingAmazon(false)
+    try {
+      await fetch(`/api/amazon/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resultados: amazon.resultados === '' ? null : Number(amazon.resultados),
+          precioUsd: amazon.precioUsd === '' ? null : Number(amazon.precioUsd),
+          bsr: amazon.bsr === '' ? null : Number(amazon.bsr),
+        }),
+      })
+      await fetchProduct()
+      showToast('Señal Amazon guardada')
+    } catch { showToast('Error al guardar Amazon', false) }
+    finally { setSavingAmazon(false) }
   }
 
   const saveKeyword = useCallback(async () => {
     const trimmed = keywordDraft.trim()
     if (!trimmed || trimmed === product?.keyword_busqueda) { setEditingKeyword(false); return }
-    await fetch(`/api/products/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keyword_busqueda: trimmed }),
-    })
-    setEditingKeyword(false)
-    await fetchProduct()
-    fetchSatML()
-  }, [keywordDraft, product, id, fetchProduct, fetchSatML])
+    try {
+      await fetch(`/api/products/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword_busqueda: trimmed }),
+      })
+      setEditingKeyword(false)
+      await fetchProduct()
+      fetchSatML()
+      showToast('Keyword actualizada')
+    } catch { showToast('Error al guardar keyword', false) }
+  }, [keywordDraft, product, id, fetchProduct, fetchSatML, showToast])
 
   const handleSaveSaturation = async () => {
     setSavingSat(true)
-    await fetch(`/api/saturation/${id}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        num_publicaciones: sat.num_publicaciones === '' ? null : Number(sat.num_publicaciones),
-        precio_min: sat.precio_min === '' ? null : Number(sat.precio_min),
-        precio_max: sat.precio_max === '' ? null : Number(sat.precio_max),
-      }),
-    })
-    await fetchProduct()
-    setSavingSat(false)
+    try {
+      await fetch(`/api/saturation/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          num_publicaciones: sat.num_publicaciones === '' ? null : Number(sat.num_publicaciones),
+          precio_min: sat.precio_min === '' ? null : Number(sat.precio_min),
+          precio_max: sat.precio_max === '' ? null : Number(sat.precio_max),
+        }),
+      })
+      await fetchProduct()
+      showToast('Saturación guardada')
+    } catch { showToast('Error al guardar saturación', false) }
+    finally { setSavingSat(false) }
   }
 
   const handleRefresh = async () => {
     setRefreshing(true)
-    await fetch(`/api/refresh/${id}`, { method: 'POST' })
-    await fetchProduct()
-    setRefreshing(false)
+    try {
+      const res = await fetch(`/api/refresh/${id}`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      await fetchProduct()
+      if (data.google_trends === null) {
+        showToast('Momentum actualizado (Google Trends no disponible)', false)
+      } else {
+        showToast('Momentum actualizado')
+      }
+    } catch { showToast('Error al refrescar', false) }
+    finally { setRefreshing(false) }
   }
 
   const handleSaveMargin = async () => {
     setSaving(true)
-    await fetch(`/api/margin/${id}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(margin),
-    })
-    await fetchProduct()
-    setSaving(false)
+    try {
+      await fetch(`/api/margin/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(margin),
+      })
+      await fetchProduct()
+      showToast('Margen guardado y recalculado')
+    } catch { showToast('Error al guardar margen', false) }
+    finally { setSaving(false) }
   }
 
   const handleSaveEstado = async (newEstado: string) => {
@@ -253,6 +292,9 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
 
   return (
     <div className="flex flex-col gap-6 max-w-4xl">
+      {toast && (
+        <Toast message={toast.message} ok={toast.ok} onDone={() => setToast(null)} />
+      )}
       <div className="flex items-center gap-4">
         <Link href="/" className="text-gray-400 hover:text-gray-700 transition-colors">
           <ChevronLeft size={20} />
@@ -404,7 +446,7 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
             {latestSat && (
               <p className="text-xs text-gray-400 text-center">
                 Última captura: {fmt(latestSat.num_publicaciones)} publicaciones ·{' '}
-                {new Date(latestSat.capturado_at).toLocaleDateString('es-MX')}
+                {haceRelativo(latestSat.capturado_at)}
               </p>
             )}
           </div>
@@ -547,7 +589,7 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
               <p className="text-xs text-gray-400">
                 Última señal: score {sig.valor ?? '—'}
                 {sig.rank ? ` · BSR ${fmt(sig.rank)}` : ''}
-                {' · '}{new Date(sig.capturado_at).toLocaleDateString('es-MX')}
+                {' · '}{haceRelativo(sig.capturado_at)}
               </p>
             ) : (
               <p className="text-xs text-gray-400">Sin señal guardada aún — busca el producto en Amazon y captura los datos.</p>
@@ -612,7 +654,7 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
                     <td className="py-2 pr-4">{s.valor ?? '—'}</td>
                     <td className="py-2 pr-4">{s.rank ?? '—'}</td>
                     <td className="py-2 pr-4">{s.tier ?? '—'}</td>
-                    <td className="py-2 text-gray-400">{new Date(s.capturado_at).toLocaleDateString('es-MX')}</td>
+                    <td className="py-2 text-gray-400" title={new Date(s.capturado_at).toLocaleDateString('es-MX')}>{haceRelativo(s.capturado_at)}</td>
                   </tr>
                 ))}
               </tbody>

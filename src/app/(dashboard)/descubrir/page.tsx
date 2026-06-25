@@ -50,6 +50,19 @@ const SORTS = [
 const clientSort = (s: string) => s === 'OPPORTUNITY' || s === 'GANANCIA_MXN'
 const apiSort = (s: string) => (clientSort(s) ? 'LAST_VOLUME_DESC' : s)
 
+const NICHO_ES_KEYWORDS: Record<string, string> = {
+  cocina: 'cocina gadgets',
+  belleza: 'belleza accesorios',
+  tech: 'electronica gadget',
+  hogar: 'hogar organizador',
+  mascotas: 'mascotas accesorios',
+  fitness: 'fitness ejercicio',
+  moda: 'moda accesorios',
+  bebe: 'bebe accesorios',
+  auto: 'auto accesorios',
+  herramientas: 'herramientas',
+}
+
 const PAISES = [
   { value: 'MX', label: '🇲🇽 Envío a México' },
   { value: '', label: '🌎 Global' },
@@ -187,10 +200,13 @@ export default function DescubrirPage() {
     return () => clearTimeout(id)
   }, [fetchProductos])
 
-  // Consulta saturación en ML MX para la keyword actual (1 llamada por búsqueda).
+  // Consulta saturación en ML MX. Cuando hay nicho activo, usa keyword en español
+  // para que ML MX devuelva resultados relevantes (en lugar del keyword inglés de AliExpress).
   useEffect(() => {
     if (productos.length === 0) return
-    const kw = productos[0]?.keyword
+    const kw = nicho
+      ? (NICHO_ES_KEYWORDS[nicho] ?? productos[0]?.keyword)
+      : (q || productos[0]?.keyword)
     if (!kw || kw === satMxKwRef.current) return
     satMxKwRef.current = kw
     setSatMxLoading(true)
@@ -200,7 +216,7 @@ export default function DescubrirPage() {
       .then((d) => setSatMxCount(d?.ok ? (d.total as number) : null))
       .catch(() => setSatMxCount(null))
       .finally(() => setSatMxLoading(false))
-  }, [productos])
+  }, [productos, nicho, q])
 
   // Reaplica con el estado actual (siempre vuelve a página 1).
   const aplicar = (over: Partial<Parameters<typeof fetchProductos>[0]> = {}) => {

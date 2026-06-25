@@ -53,6 +53,22 @@ export async function GET(request: Request) {
   })
 }
 
+function inferirNicho(categoria: string | null): string | null {
+  if (!categoria) return null
+  const c = categoria.toLowerCase()
+  if (/kitchen|food|cook|appliance/i.test(c)) return 'cocina'
+  if (/beauty|hair|skin|nail|makeup|cosmetic/i.test(c)) return 'belleza'
+  if (/electron|phone|computer|tech|gadget|camera/i.test(c)) return 'tech'
+  if (/home|furniture|garden|storage/i.test(c)) return 'hogar'
+  if (/pet|dog|cat|animal/i.test(c)) return 'mascotas'
+  if (/sport|fitness|exercise|gym/i.test(c)) return 'fitness'
+  if (/fashion|cloth|wear|shoe|bag|accessory/i.test(c)) return 'moda'
+  if (/baby|kid|child|infant|toy/i.test(c)) return 'bebe'
+  if (/car|auto|vehicle/i.test(c)) return 'auto'
+  if (/tool|hardware|diy/i.test(c)) return 'herramientas'
+  return null
+}
+
 // Acepta un producto de AliExpress y lo da de alta para evaluarlo.
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -67,6 +83,7 @@ export async function POST(request: Request) {
     .insert({
       nombre: body.nombre,
       keyword_busqueda: body.keyword,
+      nicho: inferirNicho(body.categoria ?? null),
       notas: body.url ? `AliExpress — ${body.url}` : 'AliExpress',
       imagen_url: body.imagen ?? null,
     })
