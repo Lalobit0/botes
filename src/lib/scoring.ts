@@ -29,11 +29,15 @@ function calcularMomentumFuente(signals: TrendSignal[], fuente: string): number 
       return Math.min(100, (pct / 500) * 100)
     }
     if (fuente === 'amazon_us') {
-      if (s.rank != null) {
-        // rank más bajo = mejor. Invertimos: asumimos rango 1-100 en la lista
+      // search_slope = log10-normalised result count (0-100), stored in valor
+      if (s.tipo_metrica === 'search_slope') {
+        return Math.min(100, Math.max(0, s.valor ?? 0))
+      }
+      // rank signals from "Captura rápida" use Movers&Shakers position (1-100)
+      if (s.rank != null && s.tipo_metrica === 'rank') {
         return Math.max(0, 100 - s.rank + 1)
       }
-      if (s.tipo_metrica === 'search_slope' || s.tipo_metrica === 'growth_pct') {
+      if (s.tipo_metrica === 'growth_pct') {
         return Math.min(100, Math.max(0, s.valor ?? 0))
       }
       return 0
