@@ -4,7 +4,10 @@ import {
   searchAliexpressProducts,
   aliexpressConfigurado,
   NICHO_KEYWORDS,
+  getPromocionesActivas,
+  getProductosPromo,
   type AliexpressProduct,
+  type AliexpressPromo,
 } from '@/lib/aliexpress/api'
 import { obtenerAccessToken, obtenerTendenciasML } from '@/lib/ml/api'
 
@@ -16,6 +19,7 @@ export async function GET(request: Request) {
   const nicho = searchParams.get('nicho') || ''
   const sort = searchParams.get('sort') || 'LAST_VOLUME_DESC'
   const country = searchParams.get('country') || ''
+  const promo = searchParams.get('promo') || ''
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))
   const wantChips = searchParams.get('chips') === '1'
   const minPriceUsd = parseFloat(searchParams.get('minp') || '') || undefined
@@ -24,23 +28,36 @@ export async function GET(request: Request) {
   // Keyword efectiva: búsqueda libre > nicho > default amplio de "ganadores".
   const keywords = q || NICHO_KEYWORDS[nicho] || 'gadget'
 
-  const productos =
-    (await searchAliexpressProducts({
-      keywords,
-      sort,
-      shipToCountry: country,
-      page,
-      minPriceUsd,
-      maxPriceUsd,
-    })) ?? []
+  let productos: AliexpressProduct[] = []
+  if (promo) {
+    productos = (await getProductosPromo(promo, page)) ?? []
+  } else {
+    productos =
+      (await searchAliexpressProducts({
+        keywords,
+        sort,
+        shipToCountry: country,
+        page,
+        minPriceUsd,
+        maxPriceUsd,
+      })) ?? []
+  }
 
-  // Tendencias de Mercado Libre MX como chips de búsqueda rápida (solo al inicio).
+  // Tendencias de Mercado Libre MX y promociones AliExpress: solo al inicio.
   let tendenciasMx: string[] = []
-  if (wantChips && mlConfigurado()) {
-    try {
-      const token = await obtenerAccessToken()
-      tendenciasMx = (await obtenerTendenciasML(token)).slice(0, 14)
-    } catch {}
+  let promociones: AliexpressPromo[] = []
+  if (wantChips) {
+    if (mlConfigurado()) {
+      try {
+        const token = await obtenerAccessToken()
+        tendenciasMx = (await obtenerTendenciasML(token)).slice(0, 14)
+      } catch {}
+    }
+    if (aliexpressConfigurado()) {
+      try {
+        promociones = (await getPromocionesActivas()) ?? []
+      } catch {}
+    }
   }
 
   return NextResponse.json({
@@ -49,9 +66,11 @@ export async function GET(request: Request) {
     nicho,
     sort,
     country,
+    promo,
     page,
     productos,
     tendenciasMx,
+    promociones,
   })
 }
 

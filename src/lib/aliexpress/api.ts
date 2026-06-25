@@ -178,6 +178,50 @@ function extraerProductos(json: unknown, responseKey: string): AliexpressProduct
   return mapearProductos(products)
 }
 
+export interface AliexpressPromo {
+  promoId: string
+  nombre: string
+  comisionPct: number | null
+  fechaInicio: string | null
+  fechaFin: string | null
+}
+
+// Lista las promociones destacadas activas (eventos tipo 11/11, Summer Sale, etc.).
+// Suelen tener comisiones 2-10× más altas que la búsqueda normal.
+export async function getPromocionesActivas(): Promise<AliexpressPromo[] | null> {
+  if (!aliexpressConfigurado()) return null
+  const json = await llamarAli('aliexpress.affiliate.featuredpromo.get', {})
+  if (!json) return null
+  const wrapper = get(json, 'aliexpress_affiliate_featuredpromo_get_response') ?? json
+  const result = get(get(wrapper, 'resp_result'), 'result')
+  const holder = get(result, 'promos')
+  const promos = Array.isArray(holder) ? holder : get(holder, 'promo')
+  if (!Array.isArray(promos)) return []
+  return (promos as Record<string, unknown>[]).map((p): AliexpressPromo => ({
+    promoId: String(p.promo_id ?? ''),
+    nombre: String(p.promo_name ?? 'Promoción'),
+    comisionPct: num(p.commission_rate),
+    fechaInicio: (p.start_time as string) ?? null,
+    fechaFin: (p.end_time as string) ?? null,
+  }))
+}
+
+// Productos de una promoción activa (comisiones especiales).
+export async function getProductosPromo(
+  promoId: string,
+  page = 1,
+): Promise<AliexpressProduct[] | null> {
+  if (!aliexpressConfigurado()) return null
+  const json = await llamarAli('aliexpress.affiliate.featuredpromo.products.get', {
+    promo_id: promoId,
+    page_no: String(page),
+    page_size: '24',
+    fields: PRODUCT_FIELDS,
+  })
+  if (!json) return []
+  return extraerProductos(json, 'aliexpress_affiliate_featuredpromo_products_get_response')
+}
+
 // Búsqueda de productos (ordenable por ventas/precio, filtrable por país de envío).
 // Es la API base del explorador: "aliexpress.affiliate.product.query".
 export async function searchAliexpressProducts(

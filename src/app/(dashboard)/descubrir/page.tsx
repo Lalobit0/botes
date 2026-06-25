@@ -19,10 +19,19 @@ interface Producto {
   categoria: string | null
 }
 
+interface AliexpressPromo {
+  promoId: string
+  nombre: string
+  comisionPct: number | null
+  fechaInicio: string | null
+  fechaFin: string | null
+}
+
 interface DiscoverResponse {
   sources: { aliexpress: boolean; mercadolibre_mx: boolean }
   productos: Producto[]
   tendenciasMx: string[]
+  promociones?: AliexpressPromo[]
 }
 
 const NICHOS = [
@@ -38,14 +47,16 @@ const NICHOS = [
   { value: 'herramientas', label: 'Herram.', emoji: '🔧' },
 ]
 
-// 'OPPORTUNITY' se reordena del lado del cliente (demanda × comisión ÷ precio).
+// 'OPPORTUNITY' y 'GANANCIA_MXN' se reordenan del lado del cliente.
 const SORTS = [
   { value: 'OPPORTUNITY', label: '🎯 Mejor oportunidad' },
+  { value: 'GANANCIA_MXN', label: '💰 Mayor ganancia MXN' },
   { value: 'LAST_VOLUME_DESC', label: 'Más vendidos' },
   { value: 'SALE_PRICE_ASC', label: 'Precio: menor a mayor' },
   { value: 'SALE_PRICE_DESC', label: 'Precio: mayor a menor' },
 ]
-const apiSort = (s: string) => (s === 'OPPORTUNITY' ? 'LAST_VOLUME_DESC' : s)
+const clientSort = (s: string) => s === 'OPPORTUNITY' || s === 'GANANCIA_MXN'
+const apiSort = (s: string) => (clientSort(s) ? 'LAST_VOLUME_DESC' : s)
 
 const PAISES = [
   { value: 'MX', label: '🇲🇽 Envío a México' },
@@ -85,6 +96,9 @@ export default function DescubrirPage() {
 
   const [productos, setProductos] = useState<Producto[]>([])
   const [tendencias, setTendencias] = useState<string[]>([])
+  const [promociones, setPromociones] = useState<AliexpressPromo[]>([])
+  const [promoActiva, setPromoActiva] = useState<string>('')
+  const [minComision, setMinComision] = useState<number>(0)
   const [sources, setSources] = useState({ aliexpress: false, mercadolibre_mx: false })
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -98,6 +112,7 @@ export default function DescubrirPage() {
       nicho: string
       sort: string
       country: string
+      promo?: string
       minp?: string
       maxp?: string
       page: number
@@ -110,6 +125,7 @@ export default function DescubrirPage() {
       const params = new URLSearchParams()
       if (o.q) params.set('q', o.q)
       if (o.nicho) params.set('nicho', o.nicho)
+      if (o.promo) params.set('promo', o.promo)
       params.set('sort', apiSort(o.sort))
       if (o.country) params.set('country', o.country)
       if (o.minp) params.set('minp', o.minp)
@@ -122,6 +138,7 @@ export default function DescubrirPage() {
         const data: DiscoverResponse = await res.json()
         setSources(data.sources)
         if (o.chips && data.tendenciasMx?.length) setTendencias(data.tendenciasMx)
+        if (o.chips && data.promociones?.length) setPromociones(data.promociones)
         setHasMore((data.productos?.length ?? 0) >= PAGE_SIZE)
         setProductos((prev) => (o.append ? [...prev, ...data.productos] : data.productos))
       } catch {
@@ -145,20 +162,32 @@ export default function DescubrirPage() {
   // Reaplica con el estado actual (siempre vuelve a página 1).
   const aplicar = (over: Partial<Parameters<typeof fetchProductos>[0]> = {}) => {
     setPage(1)
-    fetchProductos({ q, nicho, sort, country, minp, maxp, page: 1, ...over })
+    fetchProductos({ q, nicho, sort, country, promo: promoActiva, minp, maxp, page: 1, ...over })
   }
 
   const buscar = (texto: string) => {
     setQ(texto)
     setNicho('')
-    aplicar({ q: texto, nicho: '' })
+    setPromoActiva('')
+    aplicar({ q: texto, nicho: '', promo: '' })
   }
 
   const elegirNicho = (n: string) => {
     setNicho(n)
     setQ('')
     setText('')
-    aplicar({ q: '', nicho: n })
+    setPromoActiva('')
+    aplicar({ q: '', nicho: n, promo: '' })
+  }
+
+  const elegirPromo = (pid: string) => {
+    const next = promoActiva === pid ? '' : pid
+    setPromoActiva(next)
+    setQ('')
+    setNicho('')
+    setText('')
+    setPage(1)
+    fetchProductos({ q: '', nicho: '', sort, country, promo: next, page: 1 })
   }
 
   const cambiarSort = (s: string) => {
@@ -174,7 +203,7 @@ export default function DescubrirPage() {
   const cargarMas = () => {
     const next = page + 1
     setPage(next)
-    fetchProductos({ q, nicho, sort, country, minp, maxp, page: next, append: true })
+    fetchProductos({ q, nicho, sort, country, promo: promoActiva, minp, maxp, page: next, append: true })
   }
 
   const agregar = async (p: Producto) => {
@@ -197,10 +226,12 @@ export default function DescubrirPage() {
   }
 
   const contexto = q
-    ? `Resultados para “${q}”`
-    : nicho
-      ? NICHOS.find((n) => n.value === nicho)?.label ?? nicho
-      : 'Productos ganadores'
+    ? `Resultados para "${q}"`
+    : promoActiva
+      ? `🎁 ${promociones.find((p) => p.promoId === promoActiva)?.nombre ?? 'Promoción'}`
+      : nicho
+        ? NICHOS.find((n) => n.value === nicho)?.label ?? nicho
+        : 'Productos ganadores'
 
   // Estimación de ganancia en MX: usa el mejor precio (web/app) + comisión afiliado.
   const estimar = (p: Producto) => {
@@ -220,18 +251,28 @@ export default function DescubrirPage() {
     }
   }
 
-  // "Mejor oportunidad": demanda (ventas) × comisión ÷ √precio → ganadores baratos.
+  // "Mejor oportunidad": demanda × comisión ÷ √precio → ganadores baratos con alta comisión.
   const displayProductos = useMemo(() => {
-    if (sort !== 'OPPORTUNITY') return productos
-    const score = (p: Producto) => {
-      const precio = precioEfectivo(p)
-      if (!Number.isFinite(precio) || precio <= 0) return -1
-      const demanda = Math.log10((p.ordenes ?? 0) + 10)
-      const comision = 1 + (p.comisionPct ?? 0) / 100
-      return (demanda * comision) / Math.sqrt(precio)
+    let lista = productos
+    if (minComision > 0) lista = lista.filter((p) => (p.comisionPct ?? 0) >= minComision)
+
+    if (sort === 'OPPORTUNITY') {
+      const score = (p: Producto) => {
+        const precio = precioEfectivo(p)
+        if (!Number.isFinite(precio) || precio <= 0) return -1
+        const demanda = Math.log10((p.ordenes ?? 0) + 10)
+        const comision = 1 + (p.comisionPct ?? 0) / 100
+        return (demanda * comision) / Math.sqrt(precio)
+      }
+      return [...lista].sort((a, b) => score(b) - score(a))
     }
-    return [...productos].sort((a, b) => score(b) - score(a))
-  }, [productos, sort])
+
+    if (sort === 'GANANCIA_MXN') {
+      return [...lista].sort((a, b) => (estimar(b)?.ganancia ?? -1) - (estimar(a)?.ganancia ?? -1))
+    }
+
+    return lista
+  }, [productos, sort, minComision, fx, markup]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -388,17 +429,31 @@ export default function DescubrirPage() {
               </option>
             ))}
           </select>
+          <label className="inline-flex items-center gap-1.5 text-xs text-gray-600">
+            Comisión mín.
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value={minComision || ''}
+              onChange={(e) => setMinComision(Number(e.target.value) || 0)}
+              placeholder="0"
+              className="w-14 rounded-lg border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <span className="text-gray-400">%</span>
+          </label>
           <p className="w-full text-[11px] text-gray-400">
             Estimación rápida sobre el precio de compra (no incluye envío ni aduana). La comisión de
             afiliado es lo que AliExpress te paga por cada venta. Afina cada producto al darle
-            “Evaluar”.
+            "Evaluar".
           </p>
         </div>
       </div>
 
       {/* Tendencias de Mercado Libre MX como chips de búsqueda */}
       {tendencias.length > 0 && (
-        <div className="mb-5">
+        <div className="mb-4">
           <p className="text-xs text-gray-400 mb-2">
             🔥 Tendencia ahora en Mercado Libre MX — búscalos en AliExpress:
           </p>
@@ -415,6 +470,40 @@ export default function DescubrirPage() {
                 {t}
               </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Promociones AliExpress con comisión elevada */}
+      {promociones.length > 0 && (
+        <div className="mb-5">
+          <p className="text-xs text-gray-400 mb-2">
+            🎁 Promociones activas en AliExpress — comisión especial por tiempo limitado:
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {promociones.map((pr) => {
+              const active = promoActiva === pr.promoId
+              return (
+                <button
+                  key={pr.promoId}
+                  onClick={() => elegirPromo(pr.promoId)}
+                  className={`inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                    active
+                      ? 'bg-violet-600 text-white border-violet-600'
+                      : 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100'
+                  }`}
+                >
+                  {pr.nombre}
+                  {pr.comisionPct != null && (
+                    <span
+                      className={`font-bold ${active ? 'text-violet-200' : 'text-violet-500'}`}
+                    >
+                      {pr.comisionPct}%
+                    </span>
+                  )}
+                </button>
+              )
+            })}
           </div>
         </div>
       )}
