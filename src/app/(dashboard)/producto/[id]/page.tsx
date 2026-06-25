@@ -1,5 +1,5 @@
 'use client'
-import { use, useEffect, useState, useCallback } from 'react'
+import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
@@ -33,6 +33,9 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
   const [estado, setEstado] = useState('nuevo')
   const [notas, setNotas] = useState('')
   const [savingSat, setSavingSat] = useState(false)
+  const [loadingSatML, setLoadingSatML] = useState(false)
+  const [satMLError, setSatMLError] = useState(false)
+  const satAutoFetchedRef = useRef(false)
   const [sat, setSat] = useState<{
     num_publicaciones: string
     precio_min: string
@@ -46,8 +49,24 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
     setProduct(data)
     setEstado(data.estado)
     setNotas(data.notas ?? '')
-    if (data.radar_margin_inputs) {
-      setMargin(data.radar_margin_inputs)
+    const mi = data.radar_margin_inputs
+    if (mi) {
+      if (mi.precio_venta_estimado_mxn == null && mi.precio_origen_usd != null) {
+        // Auto-compute costo de aterrizaje y sugiere precio de venta (2.5×)
+        const costoBase = mi.precio_origen_usd * (mi.tipo_cambio ?? 18) + (mi.costo_envio_importacion_mxn ?? 0)
+        const costoLanded = costoBase * (1 + (mi.arancel_pct ?? 0) / 100) * (1 + (mi.iva_pct ?? 16) / 100)
+        const sugerido = Math.round(costoLanded * 2.5)
+        const updatedMi = { ...mi, precio_venta_estimado_mxn: sugerido }
+        setMargin(updatedMi)
+        // Guardar silenciosamente y refrescar scores
+        fetch(`/api/margin/${id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedMi),
+        }).then(() => fetchProduct())
+      } else {
+        setMargin(mi)
+      }
     }
     const ultima = data.radar_mx_saturation?.[data.radar_mx_saturation.length - 1]
     if (ultima) {
@@ -61,11 +80,53 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
     return data
   }, [id, router])
 
+  // Calcula costo de aterrizaje y margen en tiempo real desde los inputs.
+  const margenCalc = useMemo(() => {
+    const precio = margin.precio_origen_usd
+    if (!precio) return null
+    const costoBase = precio * (margin.tipo_cambio ?? 18) + (margin.costo_envio_importacion_mxn ?? 0)
+    const costoLanded = costoBase * (1 + (margin.arancel_pct ?? 0) / 100) * (1 + (margin.iva_pct ?? 16) / 100)
+    const venta = margin.precio_venta_estimado_mxn
+    const margenMxn = venta ? venta - costoLanded : null
+    const margenPct = venta && venta > 0 ? (margenMxn! / venta) * 100 : null
+    return {
+      costoLanded: Math.round(costoLanded),
+      sugerido: Math.round(costoLanded * 2.5),
+      margenMxn: margenMxn != null ? Math.round(margenMxn) : null,
+      margenPct: margenPct != null ? Math.round(margenPct) : null,
+    }
+  }, [margin])
+
+  const fetchSatML = useCallback(async () => {
+    setLoadingSatML(true)
+    setSatMLError(false)
+    try {
+      const res = await fetch(`/api/saturation/${id}`)
+      if (!res.ok) { setSatMLError(true); return }
+      const data = await res.json()
+      setSat({
+        num_publicaciones: data.total != null ? String(data.total) : '',
+        precio_min: data.precioMin != null ? String(data.precioMin) : '',
+        precio_max: data.precioMax != null ? String(data.precioMax) : '',
+      })
+      await fetchProduct()
+    } catch { setSatMLError(true) }
+    finally { setLoadingSatML(false) }
+  }, [id, fetchProduct])
+
   useEffect(() => {
     // Carga inicial de datos (patrón estándar de data-fetching en effect).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchProduct()
   }, [fetchProduct])
+
+  // Auto-fetch de ML al cargar si no hay datos de saturación previos.
+  useEffect(() => {
+    if (!loading && product && !product.radar_mx_saturation?.length && !satAutoFetchedRef.current) {
+      satAutoFetchedRef.current = true
+      fetchSatML()
+    }
+  }, [loading, product, fetchSatML])
 
   const handleSaveSaturation = async () => {
     setSavingSat(true)
@@ -183,22 +244,35 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
               </span>
             )}
           </div>
-          <p className="text-xs text-gray-500 mb-4">
-            ML bloquea la lectura automática. Abre la búsqueda, mira cuántos resultados hay y los
-            precios, y captúralos aquí.
-          </p>
-
-          <a
-            href={`https://listado.mercadolibre.com.mx/${encodeURIComponent(
-              product.keyword_busqueda.trim().toLowerCase().replace(/\s+/g, '-')
-            ).replace(/%2D/g, '-')}`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700 mb-4"
-          >
-            <Search size={14} />
-            Buscar &ldquo;{product.keyword_busqueda}&rdquo; en Mercado Libre
-          </a>
+          <div className="flex items-center gap-2 mb-4">
+            {loadingSatML ? (
+              <span className="inline-flex items-center gap-1.5 text-sm text-indigo-600">
+                <RefreshCw size={13} className="animate-spin" />
+                Obteniendo datos de Mercado Libre…
+              </span>
+            ) : (
+              <>
+                <Button variant="secondary" size="sm" onClick={fetchSatML}>
+                  <RefreshCw size={13} /> Actualizar datos ML
+                </Button>
+                <a
+                  href={`https://listado.mercadolibre.com.mx/${encodeURIComponent(
+                    product.keyword_busqueda.trim().toLowerCase().replace(/\s+/g, '-')
+                  ).replace(/%2D/g, '-')}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-indigo-600"
+                >
+                  <Search size={13} /> Ver en ML
+                </a>
+              </>
+            )}
+          </div>
+          {satMLError && (
+            <p className="text-xs text-amber-600 mb-3">
+              ML no respondió. Puedes ingresar los datos manualmente.
+            </p>
+          )}
 
           <div className="flex flex-col gap-3">
             <Input
@@ -297,6 +371,26 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
               onChange={(e) => setMargin({ ...margin, precio_venta_estimado_mxn: parseFloat(e.target.value) || null })}
               leading="$"
             />
+            {margenCalc && (
+              <div className="rounded-lg bg-indigo-50 border border-indigo-100 px-3 py-2.5 space-y-1">
+                <div className="flex justify-between text-xs text-gray-600">
+                  <span>Costo de aterrizaje</span>
+                  <span className="font-medium">${fmt(margenCalc.costoLanded)}</span>
+                </div>
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Sugerido (2.5×)</span>
+                  <span>${fmt(margenCalc.sugerido)} MXN</span>
+                </div>
+                {margenCalc.margenPct != null && (
+                  <div className={`flex justify-between text-sm font-semibold border-t border-indigo-100 pt-1 ${
+                    margenCalc.margenPct >= 40 ? 'text-emerald-600' : margenCalc.margenPct >= 20 ? 'text-amber-600' : 'text-red-500'
+                  }`}>
+                    <span>Margen estimado</span>
+                    <span>{margenCalc.margenPct}% · +${fmt(margenCalc.margenMxn)} MXN</span>
+                  </div>
+                )}
+              </div>
+            )}
             <Button onClick={handleSaveMargin} loading={saving} className="w-full mt-1">
               <Save size={14} />
               Guardar y recalcular
