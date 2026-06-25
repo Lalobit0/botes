@@ -86,7 +86,7 @@ export function OpportunidadesTable({ rows, onRefresh }: Props) {
                     onClick={() => handleRefresh(row.id)}
                     disabled={refreshing === row.id}
                     className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-indigo-600 transition-colors disabled:opacity-50"
-                    title="Refrescar datos de ML"
+                    title="Refrescar señales de momentum"
                   >
                     {refreshing === row.id ? (
                       <Loader2 size={15} className="animate-spin" />

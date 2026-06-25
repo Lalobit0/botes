@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
 import { ScoreBadge, EstadoBadge } from '@/components/ui/Badge'
-import { RefreshCw, ChevronLeft, Save, Trash2, Search } from 'lucide-react'
+import { RefreshCw, ChevronLeft, Save, Trash2, Search, Pencil, Check, X } from 'lucide-react'
 import type { ProductConDetalle, MarginInputs } from '@/lib/supabase/types'
 import Link from 'next/link'
 
@@ -44,6 +44,8 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
     bsr: '',
   })
   const [savingAmazon, setSavingAmazon] = useState(false)
+  const [editingKeyword, setEditingKeyword] = useState(false)
+  const [keywordDraft, setKeywordDraft] = useState('')
 
   const [sat, setSat] = useState<{
     num_publicaciones: string
@@ -180,6 +182,19 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
     setSavingAmazon(false)
   }
 
+  const saveKeyword = useCallback(async () => {
+    const trimmed = keywordDraft.trim()
+    if (!trimmed || trimmed === product?.keyword_busqueda) { setEditingKeyword(false); return }
+    await fetch(`/api/products/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keyword_busqueda: trimmed }),
+    })
+    setEditingKeyword(false)
+    await fetchProduct()
+    fetchSatML()
+  }, [keywordDraft, product, id, fetchProduct, fetchSatML])
+
   const handleSaveSaturation = async () => {
     setSavingSat(true)
     await fetch(`/api/saturation/${id}`, {
@@ -244,7 +259,34 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
         </Link>
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-gray-900">{product.nombre}</h1>
-          <p className="text-sm text-gray-500">Keyword: <code className="bg-gray-100 px-1 rounded">{product.keyword_busqueda}</code></p>
+          {editingKeyword ? (
+            <div className="flex items-center gap-2 mt-0.5">
+              <input
+                value={keywordDraft}
+                onChange={(e) => setKeywordDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') saveKeyword(); if (e.key === 'Escape') setEditingKeyword(false) }}
+                className="rounded-lg border border-indigo-300 px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64"
+                autoFocus
+              />
+              <button onClick={saveKeyword} className="text-indigo-600 hover:text-indigo-800 transition-colors" title="Guardar">
+                <Check size={15} />
+              </button>
+              <button onClick={() => setEditingKeyword(false)} className="text-gray-400 hover:text-gray-600 transition-colors" title="Cancelar">
+                <X size={15} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <p className="text-sm text-gray-500">Keyword: <code className="bg-gray-100 px-1 rounded">{product.keyword_busqueda}</code></p>
+              <button
+                onClick={() => { setKeywordDraft(product.keyword_busqueda); setEditingKeyword(true) }}
+                className="text-gray-400 hover:text-indigo-600 transition-colors"
+                title="Editar keyword"
+              >
+                <Pencil size={12} />
+              </button>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <EstadoBadge estado={product.estado} />
