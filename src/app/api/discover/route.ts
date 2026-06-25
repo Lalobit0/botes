@@ -4,10 +4,7 @@ import {
   searchAliexpressProducts,
   aliexpressConfigurado,
   NICHO_KEYWORDS,
-  getPromocionesActivas,
-  getProductosPromo,
   type AliexpressProduct,
-  type AliexpressPromo,
 } from '@/lib/aliexpress/api'
 import { obtenerAccessToken, obtenerTendenciasML } from '@/lib/ml/api'
 
@@ -19,45 +16,29 @@ export async function GET(request: Request) {
   const nicho = searchParams.get('nicho') || ''
   const sort = searchParams.get('sort') || 'LAST_VOLUME_DESC'
   const country = searchParams.get('country') || ''
-  const promo = searchParams.get('promo') || ''
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))
   const wantChips = searchParams.get('chips') === '1'
   const minPriceUsd = parseFloat(searchParams.get('minp') || '') || undefined
   const maxPriceUsd = parseFloat(searchParams.get('maxp') || '') || undefined
 
-  // Keyword efectiva: búsqueda libre > nicho > default amplio de "ganadores".
   const keywords = q || NICHO_KEYWORDS[nicho] || 'gadget'
 
-  let productos: AliexpressProduct[] = []
-  if (promo) {
-    productos = (await getProductosPromo(promo, page)) ?? []
-  } else {
-    productos =
-      (await searchAliexpressProducts({
-        keywords,
-        sort,
-        shipToCountry: country,
-        page,
-        minPriceUsd,
-        maxPriceUsd,
-      })) ?? []
-  }
+  const productos: AliexpressProduct[] =
+    (await searchAliexpressProducts({
+      keywords,
+      sort,
+      shipToCountry: country,
+      page,
+      minPriceUsd,
+      maxPriceUsd,
+    })) ?? []
 
-  // Tendencias de Mercado Libre MX y promociones AliExpress: solo al inicio.
   let tendenciasMx: string[] = []
-  let promociones: AliexpressPromo[] = []
-  if (wantChips) {
-    if (mlConfigurado()) {
-      try {
-        const token = await obtenerAccessToken()
-        tendenciasMx = (await obtenerTendenciasML(token)).slice(0, 14)
-      } catch {}
-    }
-    if (aliexpressConfigurado()) {
-      try {
-        promociones = (await getPromocionesActivas()) ?? []
-      } catch {}
-    }
+  if (wantChips && mlConfigurado()) {
+    try {
+      const token = await obtenerAccessToken()
+      tendenciasMx = (await obtenerTendenciasML(token)).slice(0, 14)
+    } catch {}
   }
 
   return NextResponse.json({
@@ -66,11 +47,9 @@ export async function GET(request: Request) {
     nicho,
     sort,
     country,
-    promo,
     page,
     productos,
     tendenciasMx,
-    promociones,
   })
 }
 
@@ -95,7 +74,6 @@ export async function POST(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // Señal de momentum con el volumen de órdenes de AliExpress.
   if (body.ordenes != null) {
     await supabase.from('radar_trend_signals').insert({
       product_id: data.id,
@@ -106,7 +84,6 @@ export async function POST(request: Request) {
     })
   }
 
-  // Pre-llena la calculadora de margen con el precio de compra (USD).
   if (body.precioUsd != null) {
     await supabase.from('radar_margin_inputs').upsert({
       product_id: data.id,

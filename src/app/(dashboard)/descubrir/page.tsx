@@ -20,19 +20,10 @@ interface Producto {
   categoria: string | null
 }
 
-interface AliexpressPromo {
-  promoId: string
-  nombre: string
-  comisionPct: number | null
-  fechaInicio: string | null
-  fechaFin: string | null
-}
-
 interface DiscoverResponse {
   sources: { aliexpress: boolean; mercadolibre_mx: boolean }
   productos: Producto[]
   tendenciasMx: string[]
-  promociones?: AliexpressPromo[]
 }
 
 const NICHOS = [
@@ -97,8 +88,6 @@ export default function DescubrirPage() {
 
   const [productos, setProductos] = useState<Producto[]>([])
   const [tendencias, setTendencias] = useState<string[]>([])
-  const [promociones, setPromociones] = useState<AliexpressPromo[]>([])
-  const [promoActiva, setPromoActiva] = useState<string>('')
   const [minComision, setMinComision] = useState<number>(0)
   const [sources, setSources] = useState({ aliexpress: false, mercadolibre_mx: false })
   const [loading, setLoading] = useState(true)
@@ -118,7 +107,6 @@ export default function DescubrirPage() {
       nicho: string
       sort: string
       country: string
-      promo?: string
       minp?: string
       maxp?: string
       page: number
@@ -131,7 +119,6 @@ export default function DescubrirPage() {
       const params = new URLSearchParams()
       if (o.q) params.set('q', o.q)
       if (o.nicho) params.set('nicho', o.nicho)
-      if (o.promo) params.set('promo', o.promo)
       params.set('sort', apiSort(o.sort))
       if (o.country) params.set('country', o.country)
       if (o.minp) params.set('minp', o.minp)
@@ -144,7 +131,6 @@ export default function DescubrirPage() {
         const data: DiscoverResponse = await res.json()
         setSources(data.sources)
         if (o.chips && data.tendenciasMx?.length) setTendencias(data.tendenciasMx)
-        if (o.chips && data.promociones?.length) setPromociones(data.promociones)
         setHasMore((data.productos?.length ?? 0) >= PAGE_SIZE)
         setProductos((prev) => (o.append ? [...prev, ...data.productos] : data.productos))
       } catch {
@@ -199,32 +185,20 @@ export default function DescubrirPage() {
   // Reaplica con el estado actual (siempre vuelve a página 1).
   const aplicar = (over: Partial<Parameters<typeof fetchProductos>[0]> = {}) => {
     setPage(1)
-    fetchProductos({ q, nicho, sort, country, promo: promoActiva, minp, maxp, page: 1, ...over })
+    fetchProductos({ q, nicho, sort, country, minp, maxp, page: 1, ...over })
   }
 
   const buscar = (texto: string) => {
     setQ(texto)
     setNicho('')
-    setPromoActiva('')
-    aplicar({ q: texto, nicho: '', promo: '' })
+    aplicar({ q: texto, nicho: '' })
   }
 
   const elegirNicho = (n: string) => {
     setNicho(n)
     setQ('')
     setText('')
-    setPromoActiva('')
-    aplicar({ q: '', nicho: n, promo: '' })
-  }
-
-  const elegirPromo = (pid: string) => {
-    const next = promoActiva === pid ? '' : pid
-    setPromoActiva(next)
-    setQ('')
-    setNicho('')
-    setText('')
-    setPage(1)
-    fetchProductos({ q: '', nicho: '', sort, country, promo: next, page: 1 })
+    aplicar({ q: '', nicho: n })
   }
 
   const cambiarSort = (s: string) => {
@@ -240,7 +214,7 @@ export default function DescubrirPage() {
   const cargarMas = () => {
     const next = page + 1
     setPage(next)
-    fetchProductos({ q, nicho, sort, country, promo: promoActiva, minp, maxp, page: next, append: true })
+    fetchProductos({ q, nicho, sort, country, minp, maxp, page: next, append: true })
   }
 
   const agregar = async (p: Producto) => {
@@ -264,11 +238,9 @@ export default function DescubrirPage() {
 
   const contexto = q
     ? `Resultados para "${q}"`
-    : promoActiva
-      ? `🎁 ${promociones.find((p) => p.promoId === promoActiva)?.nombre ?? 'Promoción'}`
-      : nicho
-        ? NICHOS.find((n) => n.value === nicho)?.label ?? nicho
-        : 'Productos ganadores'
+    : nicho
+      ? NICHOS.find((n) => n.value === nicho)?.label ?? nicho
+      : 'Productos ganadores'
 
   // Estimación de ganancia en MX: usa el mejor precio (web/app) + comisión afiliado.
   const estimar = (p: Producto) => {
@@ -507,40 +479,6 @@ export default function DescubrirPage() {
                 {t}
               </button>
             ))}
-          </div>
-        </div>
-      )}
-
-      {/* Promociones AliExpress con comisión elevada */}
-      {promociones.length > 0 && (
-        <div className="mb-5">
-          <p className="text-xs text-gray-400 mb-2">
-            🎁 Promociones activas en AliExpress — comisión especial por tiempo limitado:
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {promociones.map((pr) => {
-              const active = promoActiva === pr.promoId
-              return (
-                <button
-                  key={pr.promoId}
-                  onClick={() => elegirPromo(pr.promoId)}
-                  className={`inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                    active
-                      ? 'bg-violet-600 text-white border-violet-600'
-                      : 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100'
-                  }`}
-                >
-                  {pr.nombre}
-                  {pr.comisionPct != null && (
-                    <span
-                      className={`font-bold ${active ? 'text-violet-200' : 'text-violet-500'}`}
-                    >
-                      {pr.comisionPct}%
-                    </span>
-                  )}
-                </button>
-              )
-            })}
           </div>
         </div>
       )}
