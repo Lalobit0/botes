@@ -206,7 +206,7 @@ export async function getPromocionesActivas(): Promise<AliexpressPromo[] | null>
   const promos = Array.isArray(holder) ? holder : get(holder, 'promo')
   if (!Array.isArray(promos)) return []
   return (promos as Record<string, unknown>[]).map((p): AliexpressPromo => ({
-    promoId: String(p.promo_id ?? ''),
+    promoId: String(p.promo_name ?? p.promo_id ?? ''),
     nombre: String(p.promo_name ?? 'Promoción'),
     comisionPct: num(p.commission_rate),
     fechaInicio: (p.start_time as string) ?? null,
@@ -221,7 +221,7 @@ export async function getProductosPromo(
 ): Promise<AliexpressProduct[] | null> {
   if (!aliexpressConfigurado()) return null
   const json = await llamarAli('aliexpress.affiliate.featuredpromo.products.get', {
-    promo_id: promoId,
+    promo_name: promoId,
     page_no: String(page),
     page_size: '24',
     fields: PRODUCT_FIELDS,
