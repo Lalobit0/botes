@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Search, Plus, ExternalLink, Check, Radar } from 'lucide-react'
 
@@ -7,9 +7,12 @@ interface Producto {
   nombre: string
   keyword: string
   precioUsd: number | null
+  precioAppUsd: number | null
   precioOriginalUsd: number | null
   descuentoPct: number | null
+  comisionPct: number | null
   imagen: string | null
+  video: string | null
   url: string | null
   ordenes: number | null
   rating: number | null
@@ -18,11 +21,6 @@ interface Producto {
 
 interface DiscoverResponse {
   sources: { aliexpress: boolean; mercadolibre_mx: boolean }
-  q: string
-  nicho: string
-  sort: string
-  country: string
-  page: number
   productos: Producto[]
   tendenciasMx: string[]
 }
@@ -40,11 +38,14 @@ const NICHOS = [
   { value: 'herramientas', label: 'Herram.', emoji: '🔧' },
 ]
 
+// 'OPPORTUNITY' se reordena del lado del cliente (demanda × comisión ÷ precio).
 const SORTS = [
+  { value: 'OPPORTUNITY', label: '🎯 Mejor oportunidad' },
   { value: 'LAST_VOLUME_DESC', label: 'Más vendidos' },
   { value: 'SALE_PRICE_ASC', label: 'Precio: menor a mayor' },
   { value: 'SALE_PRICE_DESC', label: 'Precio: mayor a menor' },
 ]
+const apiSort = (s: string) => (s === 'OPPORTUNITY' ? 'LAST_VOLUME_DESC' : s)
 
 const PAISES = [
   { value: 'MX', label: '🇲🇽 Envío a México' },
@@ -67,13 +68,17 @@ const MARKUPS = [
 const PAGE_SIZE = 24
 const fmt = (n: number) => n.toLocaleString('es-MX')
 const fmtMoney = (n: number) => n.toLocaleString('es-MX', { maximumFractionDigits: 0 })
+const precioEfectivo = (p: Producto) =>
+  Math.min(p.precioUsd ?? Infinity, p.precioAppUsd ?? Infinity)
 
 export default function DescubrirPage() {
   const [text, setText] = useState('')
   const [q, setQ] = useState('')
   const [nicho, setNicho] = useState('')
-  const [sort, setSort] = useState('LAST_VOLUME_DESC')
+  const [sort, setSort] = useState('OPPORTUNITY')
   const [country, setCountry] = useState('MX')
+  const [minp, setMinp] = useState('')
+  const [maxp, setMaxp] = useState('')
   const [page, setPage] = useState(1)
   const [fx, setFx] = useState(18.5)
   const [markup, setMarkup] = useState(3)
@@ -93,6 +98,8 @@ export default function DescubrirPage() {
       nicho: string
       sort: string
       country: string
+      minp?: string
+      maxp?: string
       page: number
       chips?: boolean
       append?: boolean
@@ -103,8 +110,10 @@ export default function DescubrirPage() {
       const params = new URLSearchParams()
       if (o.q) params.set('q', o.q)
       if (o.nicho) params.set('nicho', o.nicho)
-      params.set('sort', o.sort)
+      params.set('sort', apiSort(o.sort))
       if (o.country) params.set('country', o.country)
+      if (o.minp) params.set('minp', o.minp)
+      if (o.maxp) params.set('maxp', o.maxp)
       params.set('page', String(o.page))
       if (o.chips) params.set('chips', '1')
 
@@ -128,42 +137,44 @@ export default function DescubrirPage() {
   // Carga inicial (diferida para no setear estado de forma síncrona en el efecto).
   useEffect(() => {
     const id = setTimeout(() => {
-      fetchProductos({ q: '', nicho: '', sort: 'LAST_VOLUME_DESC', country: 'MX', page: 1, chips: true })
+      fetchProductos({ q: '', nicho: '', sort: 'OPPORTUNITY', country: 'MX', page: 1, chips: true })
     }, 0)
     return () => clearTimeout(id)
   }, [fetchProductos])
 
+  // Reaplica con el estado actual (siempre vuelve a página 1).
+  const aplicar = (over: Partial<Parameters<typeof fetchProductos>[0]> = {}) => {
+    setPage(1)
+    fetchProductos({ q, nicho, sort, country, minp, maxp, page: 1, ...over })
+  }
+
   const buscar = (texto: string) => {
     setQ(texto)
     setNicho('')
-    setPage(1)
-    fetchProductos({ q: texto, nicho: '', sort, country, page: 1 })
+    aplicar({ q: texto, nicho: '' })
   }
 
   const elegirNicho = (n: string) => {
     setNicho(n)
     setQ('')
     setText('')
-    setPage(1)
-    fetchProductos({ q: '', nicho: n, sort, country, page: 1 })
+    aplicar({ q: '', nicho: n })
   }
 
   const cambiarSort = (s: string) => {
     setSort(s)
-    setPage(1)
-    fetchProductos({ q, nicho, sort: s, country, page: 1 })
+    aplicar({ sort: s })
   }
 
   const cambiarPais = (c: string) => {
     setCountry(c)
-    setPage(1)
-    fetchProductos({ q, nicho, sort, country: c, page: 1 })
+    aplicar({ country: c })
   }
 
   const cargarMas = () => {
     const next = page + 1
     setPage(next)
-    fetchProductos({ q, nicho, sort, country, page: next, append: true })
+    fetchProductos({ q, nicho, sort, country, minp, maxp, page: next, append: true })
   }
 
   const agregar = async (p: Producto) => {
@@ -173,7 +184,7 @@ export default function DescubrirPage() {
       const res = await fetch('/api/discover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(p),
+        body: JSON.stringify({ ...p, precioUsd: precioEfectivo(p) }),
       })
       if (res.ok) {
         const prod = await res.json()
@@ -188,15 +199,39 @@ export default function DescubrirPage() {
   const contexto = q
     ? `Resultados para “${q}”`
     : nicho
-      ? `${NICHOS.find((n) => n.value === nicho)?.label ?? nicho} · más vendidos`
-      : 'Productos ganadores · más vendidos'
+      ? NICHOS.find((n) => n.value === nicho)?.label ?? nicho
+      : 'Productos ganadores'
 
-  // Estimación rápida de ganancia en MX desde el precio de compra (USD).
-  const estimar = (precioUsd: number) => {
-    const costo = precioUsd * fx
+  // Estimación de ganancia en MX: usa el mejor precio (web/app) + comisión afiliado.
+  const estimar = (p: Producto) => {
+    const precio = precioEfectivo(p)
+    if (!Number.isFinite(precio)) return null
+    const costo = precio * fx
     const sell = costo * markup
-    return { costo, sell, margenPct: sell > 0 ? Math.round(((sell - costo) / sell) * 100) : 0 }
+    const comisionMxn = costo * ((p.comisionPct ?? 0) / 100)
+    const margen = sell - costo
+    return {
+      precio,
+      costo,
+      sell,
+      comisionMxn,
+      ganancia: margen + comisionMxn,
+      margenPct: sell > 0 ? Math.round((margen / sell) * 100) : 0,
+    }
   }
+
+  // "Mejor oportunidad": demanda (ventas) × comisión ÷ √precio → ganadores baratos.
+  const displayProductos = useMemo(() => {
+    if (sort !== 'OPPORTUNITY') return productos
+    const score = (p: Producto) => {
+      const precio = precioEfectivo(p)
+      if (!Number.isFinite(precio) || precio <= 0) return -1
+      const demanda = Math.log10((p.ordenes ?? 0) + 10)
+      const comision = 1 + (p.comisionPct ?? 0) / 100
+      return (demanda * comision) / Math.sqrt(precio)
+    }
+    return [...productos].sort((a, b) => score(b) - score(a))
+  }, [productos, sort])
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -208,8 +243,8 @@ export default function DescubrirPage() {
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-gray-900">Descubrir</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Encuentra productos ganadores en AliExpress antes de que saturen México. Mira precio de
-            compra, ventas y agrégalos para calcular tu margen.
+            Productos ganadores en AliExpress antes de que saturen México: precio de compra,
+            comisión de afiliado y tu ganancia estimada por pieza.
           </p>
         </div>
         <div className="hidden sm:flex gap-1.5 text-xs shrink-0 pt-1">
@@ -278,8 +313,8 @@ export default function DescubrirPage() {
           })}
         </div>
 
-        {/* Orden + país */}
-        <div className="flex flex-wrap gap-2 mt-3">
+        {/* Orden + país + rango de precio */}
+        <div className="flex flex-wrap items-center gap-2 mt-3">
           <select
             value={sort}
             onChange={(e) => cambiarSort(e.target.value)}
@@ -302,6 +337,30 @@ export default function DescubrirPage() {
               </option>
             ))}
           </select>
+          <div className="inline-flex items-center gap-1 text-xs text-gray-500">
+            <span>Precio USD</span>
+            <input
+              type="number"
+              min="0"
+              value={minp}
+              onChange={(e) => setMinp(e.target.value)}
+              onBlur={() => aplicar()}
+              onKeyDown={(e) => e.key === 'Enter' && aplicar()}
+              placeholder="min"
+              className="w-14 rounded-lg border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <span>–</span>
+            <input
+              type="number"
+              min="0"
+              value={maxp}
+              onChange={(e) => setMaxp(e.target.value)}
+              onBlur={() => aplicar()}
+              onKeyDown={(e) => e.key === 'Enter' && aplicar()}
+              placeholder="max"
+              className="w-14 rounded-lg border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
         </div>
 
         {/* Ganancia estimada: controles */}
@@ -330,8 +389,9 @@ export default function DescubrirPage() {
             ))}
           </select>
           <p className="w-full text-[11px] text-gray-400">
-            Estimación rápida sobre el precio de compra (no incluye envío ni aduana). Afina cada
-            producto al darle “Evaluar”.
+            Estimación rápida sobre el precio de compra (no incluye envío ni aduana). La comisión de
+            afiliado es lo que AliExpress te paga por cada venta. Afina cada producto al darle
+            “Evaluar”.
           </p>
         </div>
       </div>
@@ -386,11 +446,13 @@ export default function DescubrirPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {productos.map((p, i) => {
+            {displayProductos.map((p, i) => {
               const key = p.url ?? p.nombre
               const isAdded = added.has(key)
               const ganador = (p.ordenes ?? 0) >= 5000
-              const est = p.precioUsd != null ? estimar(p.precioUsd) : null
+              const est = estimar(p)
+              const usaApp =
+                p.precioAppUsd != null && p.precioAppUsd < (p.precioUsd ?? Infinity)
               return (
                 <div
                   key={`${key}-${i}`}
@@ -420,6 +482,16 @@ export default function DescubrirPage() {
                         🔥 Ganador
                       </span>
                     )}
+                    {p.video && (
+                      <a
+                        href={p.video}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full backdrop-blur-sm hover:bg-black/80 transition-colors"
+                      >
+                        ▶ Video
+                      </a>
+                    )}
                   </div>
 
                   <div className="p-3.5 flex flex-col gap-1.5 flex-1">
@@ -434,9 +506,14 @@ export default function DescubrirPage() {
 
                     <div className="flex items-end gap-1.5 flex-wrap">
                       <span className="text-lg font-bold text-gray-900">
-                        ${p.precioUsd != null ? p.precioUsd.toFixed(2) : '—'}
+                        ${est ? est.precio.toFixed(2) : '—'}
                       </span>
                       <span className="text-[11px] text-gray-400 mb-0.5">USD</span>
+                      {usaApp && (
+                        <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-50 rounded px-1 mb-0.5">
+                          precio app
+                        </span>
+                      )}
                       {p.precioOriginalUsd && p.descuentoPct ? (
                         <span className="text-xs text-gray-400 line-through mb-0.5">
                           ${p.precioOriginalUsd.toFixed(2)}
@@ -444,20 +521,33 @@ export default function DescubrirPage() {
                       ) : null}
                     </div>
 
-                    <div className="flex items-center gap-3 text-xs text-gray-500">
-                      {p.ordenes != null && <span>📦 {fmt(p.ordenes)} vendidos</span>}
+                    <div className="flex items-center gap-2.5 text-xs text-gray-500 flex-wrap">
+                      {p.ordenes != null && <span>📦 {fmt(p.ordenes)}</span>}
                       {p.rating != null && <span>★ {p.rating.toFixed(0)}%</span>}
+                      {p.comisionPct != null && p.comisionPct > 0 && (
+                        <span className="text-indigo-600 font-medium">💸 {p.comisionPct}%</span>
+                      )}
                     </div>
 
                     {est && (
-                      <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-2.5 py-1.5">
+                      <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-2.5 py-1.5 space-y-0.5">
                         <div className="flex items-center justify-between text-[11px] text-gray-500">
-                          <span>Costo puesto en MX</span>
+                          <span>Costo en MX</span>
                           <span className="font-medium text-gray-700">${fmtMoney(est.costo)}</span>
                         </div>
-                        <div className="flex items-center justify-between text-xs font-semibold text-emerald-700 mt-0.5">
-                          <span>Vende ≈ ${fmtMoney(est.sell)}</span>
-                          <span className="bg-emerald-100 rounded px-1.5 py-0.5">+{est.margenPct}%</span>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-gray-600">Vende ≈ ${fmtMoney(est.sell)}</span>
+                          <span className="font-semibold text-emerald-700">+{est.margenPct}%</span>
+                        </div>
+                        {est.comisionMxn > 0 && (
+                          <div className="flex items-center justify-between text-[11px] text-indigo-600">
+                            <span>+ comisión afiliado</span>
+                            <span>≈ ${fmtMoney(est.comisionMxn)}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between text-xs font-bold text-emerald-800 border-t border-emerald-100 pt-1 mt-0.5">
+                          <span>Ganancia / pieza</span>
+                          <span>≈ ${fmtMoney(est.ganancia)}</span>
                         </div>
                       </div>
                     )}

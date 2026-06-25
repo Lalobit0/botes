@@ -10,9 +10,12 @@ export interface AliexpressProduct {
   nombre: string
   keyword: string
   precioUsd: number | null
+  precioAppUsd: number | null
   precioOriginalUsd: number | null
   descuentoPct: number | null
+  comisionPct: number | null
   imagen: string | null
+  video: string | null
   url: string | null
   ordenes: number | null
   rating: number | null
@@ -25,9 +28,33 @@ export interface BusquedaOpts {
   // LAST_VOLUME_DESC (más vendidos), SALE_PRICE_ASC, SALE_PRICE_DESC, etc.
   sort?: string
   shipToCountry?: string
+  minPriceUsd?: number
+  maxPriceUsd?: number
   page?: number
   pageSize?: number
 }
+
+// Campos que pedimos explícitamente para traer comisión, precio de app y video
+// (que no vienen en el set por defecto).
+const PRODUCT_FIELDS = [
+  'product_id',
+  'product_title',
+  'product_main_image_url',
+  'product_video_url',
+  'target_sale_price',
+  'target_app_sale_price',
+  'target_original_price',
+  'original_price',
+  'sale_price',
+  'discount',
+  'evaluate_rate',
+  'lastest_volume',
+  'commission_rate',
+  'promotion_link',
+  'product_detail_url',
+  'first_level_category_name',
+  'second_level_category_name',
+].join(',')
 
 // Mapa nicho (es) → keyword de búsqueda (en, que es como responde mejor la API).
 export const NICHO_KEYWORDS: Record<string, string> = {
@@ -118,9 +145,12 @@ function mapearProductos(products: unknown): AliexpressProduct[] {
       nombre: String(p.product_title ?? 'Producto AliExpress'),
       keyword: String(p.product_title ?? '').split(' ').slice(0, 4).join(' '),
       precioUsd: precio,
+      precioAppUsd: num(p.target_app_sale_price),
       precioOriginalUsd: original,
       descuentoPct: descuento,
+      comisionPct: num(p.commission_rate ?? p.hot_product_commission_rate),
       imagen: (p.product_main_image_url as string) ?? null,
+      video: (p.product_video_url as string) || null,
       url: (p.promotion_link as string) ?? (p.product_detail_url as string) ?? null,
       ordenes: num(p.lastest_volume),
       rating: num(p.evaluate_rate),
@@ -159,10 +189,14 @@ export async function searchAliexpressProducts(
     page_no: String(opts.page ?? 1),
     page_size: String(opts.pageSize ?? 24),
     sort: opts.sort ?? 'LAST_VOLUME_DESC',
+    fields: PRODUCT_FIELDS,
   }
   if (opts.keywords) extra.keywords = opts.keywords
   if (opts.categoryIds) extra.category_ids = opts.categoryIds
   if (opts.shipToCountry) extra.ship_to_country = opts.shipToCountry
+  // min/max_sale_price van en centavos.
+  if (opts.minPriceUsd) extra.min_sale_price = String(Math.round(opts.minPriceUsd * 100))
+  if (opts.maxPriceUsd) extra.max_sale_price = String(Math.round(opts.maxPriceUsd * 100))
 
   const json = await llamarAli('aliexpress.affiliate.product.query', extra)
   if (!json) return []

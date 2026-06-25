@@ -18,12 +18,21 @@ export async function GET(request: Request) {
   const country = searchParams.get('country') || ''
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))
   const wantChips = searchParams.get('chips') === '1'
+  const minPriceUsd = parseFloat(searchParams.get('minp') || '') || undefined
+  const maxPriceUsd = parseFloat(searchParams.get('maxp') || '') || undefined
 
   // Keyword efectiva: búsqueda libre > nicho > default amplio de "ganadores".
   const keywords = q || NICHO_KEYWORDS[nicho] || 'gadget'
 
   const productos =
-    (await searchAliexpressProducts({ keywords, sort, shipToCountry: country, page })) ?? []
+    (await searchAliexpressProducts({
+      keywords,
+      sort,
+      shipToCountry: country,
+      page,
+      minPriceUsd,
+      maxPriceUsd,
+    })) ?? []
 
   // Tendencias de Mercado Libre MX como chips de búsqueda rápida (solo al inicio).
   let tendenciasMx: string[] = []
