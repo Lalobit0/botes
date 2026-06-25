@@ -36,6 +36,15 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
   const [loadingSatML, setLoadingSatML] = useState(false)
   const [satMLError, setSatMLError] = useState(false)
   const satAutoFetchedRef = useRef(false)
+  const gtAutoFetchedRef = useRef(false)
+
+  const [amazon, setAmazon] = useState<{ resultados: string; precioUsd: string; bsr: string }>({
+    resultados: '',
+    precioUsd: '',
+    bsr: '',
+  })
+  const [savingAmazon, setSavingAmazon] = useState(false)
+
   const [sat, setSat] = useState<{
     num_publicaciones: string
     precio_min: string
@@ -74,6 +83,20 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
         num_publicaciones: ultima.num_publicaciones?.toString() ?? '',
         precio_min: ultima.precio_min?.toString() ?? '',
         precio_max: ultima.precio_max?.toString() ?? '',
+      })
+    }
+    // Cargar señal Amazon más reciente si existe
+    const amazonSig = data.radar_trend_signals
+      ?.filter((s) => s.fuente === 'amazon_us' && s.tipo_metrica === 'search_slope')
+      .sort((a, b) => new Date(b.capturado_at).getTime() - new Date(a.capturado_at).getTime())[0]
+    const amazonPrecio = data.radar_trend_signals
+      ?.filter((s) => s.fuente === 'amazon_us' && s.tipo_metrica === 'precio_usd')
+      .sort((a, b) => new Date(b.capturado_at).getTime() - new Date(a.capturado_at).getTime())[0]
+    if (amazonSig) {
+      setAmazon({
+        resultados: '',
+        precioUsd: amazonPrecio?.valor?.toString() ?? '',
+        bsr: amazonSig.rank?.toString() ?? '',
       })
     }
     setLoading(false)
@@ -127,6 +150,35 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
       fetchSatML()
     }
   }, [loading, product, fetchSatML])
+
+  // Auto-fetch Google Trends al cargar si no hay señal previa.
+  useEffect(() => {
+    if (!loading && product && !gtAutoFetchedRef.current) {
+      const hasGT = product.radar_trend_signals?.some((s) => s.fuente === 'google_trends')
+      if (!hasGT) {
+        gtAutoFetchedRef.current = true
+        setRefreshing(true)
+        fetch(`/api/refresh/${id}`, { method: 'POST' })
+          .then(() => fetchProduct())
+          .finally(() => setRefreshing(false))
+      }
+    }
+  }, [loading, product, id, fetchProduct])
+
+  const handleSaveAmazon = async () => {
+    setSavingAmazon(true)
+    await fetch(`/api/amazon/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        resultados: amazon.resultados === '' ? null : Number(amazon.resultados),
+        precioUsd: amazon.precioUsd === '' ? null : Number(amazon.precioUsd),
+        bsr: amazon.bsr === '' ? null : Number(amazon.bsr),
+      }),
+    })
+    await fetchProduct()
+    setSavingAmazon(false)
+  }
 
   const handleSaveSaturation = async () => {
     setSavingSat(true)
@@ -396,6 +448,69 @@ export default function ProductoPage({ params }: { params: Promise<{ id: string 
               Guardar y recalcular
             </Button>
           </div>
+        </div>
+      </div>
+
+      {/* Demanda en Amazon US */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold text-gray-900">Demanda en Amazon US</h2>
+          <a
+            href={`https://www.amazon.com/s?k=${encodeURIComponent(product.keyword_busqueda)}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-indigo-600"
+          >
+            <Search size={13} /> Ver en Amazon
+          </a>
+        </div>
+        <div className="grid sm:grid-cols-3 gap-3">
+          <Input
+            label="Resultados totales"
+            type="number"
+            min="0"
+            placeholder="ej. 5000"
+            value={amazon.resultados}
+            onChange={(e) => setAmazon({ ...amazon, resultados: e.target.value })}
+          />
+          <Input
+            label="Precio 1er resultado USD"
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="ej. 24.99"
+            value={amazon.precioUsd}
+            onChange={(e) => setAmazon({ ...amazon, precioUsd: e.target.value })}
+            leading="$"
+          />
+          <Input
+            label="BSR posición (opcional)"
+            type="number"
+            min="1"
+            placeholder="ej. 3500"
+            value={amazon.bsr}
+            onChange={(e) => setAmazon({ ...amazon, bsr: e.target.value })}
+          />
+        </div>
+        <div className="mt-3 flex items-center gap-3 flex-wrap">
+          <Button onClick={handleSaveAmazon} loading={savingAmazon}>
+            <Save size={14} />
+            Guardar señal Amazon
+          </Button>
+          {(() => {
+            const sig = product.radar_trend_signals
+              ?.filter((s) => s.fuente === 'amazon_us' && s.tipo_metrica === 'search_slope')
+              .sort((a, b) => new Date(b.capturado_at).getTime() - new Date(a.capturado_at).getTime())[0]
+            return sig ? (
+              <p className="text-xs text-gray-400">
+                Última señal: score {sig.valor ?? '—'}
+                {sig.rank ? ` · BSR ${fmt(sig.rank)}` : ''}
+                {' · '}{new Date(sig.capturado_at).toLocaleDateString('es-MX')}
+              </p>
+            ) : (
+              <p className="text-xs text-gray-400">Sin señal guardada aún — busca el producto en Amazon y captura los datos.</p>
+            )
+          })()}
         </div>
       </div>
 
