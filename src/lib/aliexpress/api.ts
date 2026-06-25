@@ -10,9 +10,37 @@ export interface AliexpressProduct {
   nombre: string
   keyword: string
   precioUsd: number | null
+  precioOriginalUsd: number | null
+  descuentoPct: number | null
   imagen: string | null
   url: string | null
   ordenes: number | null
+  rating: number | null
+  categoria: string | null
+}
+
+export interface BusquedaOpts {
+  keywords?: string
+  categoryIds?: string
+  // LAST_VOLUME_DESC (más vendidos), SALE_PRICE_ASC, SALE_PRICE_DESC, etc.
+  sort?: string
+  shipToCountry?: string
+  page?: number
+  pageSize?: number
+}
+
+// Mapa nicho (es) → keyword de búsqueda (en, que es como responde mejor la API).
+export const NICHO_KEYWORDS: Record<string, string> = {
+  cocina: 'kitchen gadget',
+  belleza: 'beauty tool',
+  tech: 'smart gadget',
+  hogar: 'home organizer',
+  mascotas: 'pet supplies',
+  fitness: 'fitness equipment',
+  moda: 'fashion accessories',
+  bebe: 'baby products',
+  auto: 'car accessories',
+  herramientas: 'tools gadget',
 }
 
 function firmar(params: Record<string, string>, secret: string): string {
@@ -46,6 +74,7 @@ async function llamarAli(method: string, extra: Record<string, string>) {
     target_language: 'EN',
     ...extra,
   }
+  if (process.env.ALIEXPRESS_TRACKING_ID) params.tracking_id = process.env.ALIEXPRESS_TRACKING_ID
   params.sign = firmar(params, secret)
 
   try {
@@ -70,61 +99,95 @@ async function llamarAli(method: string, extra: Record<string, string>) {
   }
 }
 
+function num(v: unknown): number | null {
+  if (v == null || v === '') return null
+  const n = Number(String(v).replace('%', ''))
+  return Number.isFinite(n) ? n : null
+}
+
 function mapearProductos(products: unknown): AliexpressProduct[] {
   const lista = Array.isArray(products) ? products : []
-  return lista.map(
-    (p: Record<string, unknown>): AliexpressProduct => ({
+  return lista.map((p: Record<string, unknown>): AliexpressProduct => {
+    const precio = num(p.target_sale_price ?? p.sale_price)
+    const original = num(p.target_original_price ?? p.original_price)
+    const descuento =
+      precio != null && original != null && original > precio
+        ? Math.round(((original - precio) / original) * 100)
+        : null
+    return {
       nombre: String(p.product_title ?? 'Producto AliExpress'),
       keyword: String(p.product_title ?? '').split(' ').slice(0, 4).join(' '),
-      precioUsd: p.target_sale_price ? Number(p.target_sale_price) : null,
+      precioUsd: precio,
+      precioOriginalUsd: original,
+      descuentoPct: descuento,
       imagen: (p.product_main_image_url as string) ?? null,
       url: (p.promotion_link as string) ?? (p.product_detail_url as string) ?? null,
-      ordenes: p.lastest_volume ? Number(p.lastest_volume) : null,
-    })
-  )
+      ordenes: num(p.lastest_volume),
+      rating: num(p.evaluate_rate),
+      categoria:
+        (p.first_level_category_name as string) ??
+        (p.second_level_category_name as string) ??
+        null,
+    }
+  })
 }
 
-// Descubrimiento de productos. Intenta "hot products"; si esa API no tiene
-// permiso (común en cuentas nuevas), cae a la búsqueda de productos por keyword,
-// que suele estar disponible y es más útil para productos específicos.
-export async function getAliexpressHotProducts(
-  categoryIds?: string
-): Promise<AliexpressProduct[] | null> {
-  if (!aliexpressConfigurado()) return null
-
-  const hot = await llamarAli('aliexpress.affiliate.hotproduct.query', {
-    page_size: '20',
-    page_no: '1',
-    ...(categoryIds ? { category_ids: categoryIds } : {}),
-  })
-  const hotResult =
-    hot?.aliexpress_affiliate_hotproduct_query_response?.resp_result?.result ??
-    hot?.resp_result?.result
-  const hotProducts = hotResult?.products?.product ?? hotResult?.products
-  if (Array.isArray(hotProducts) && hotProducts.length) return mapearProductos(hotProducts)
-
-  // Fallback: productos más vendidos por una keyword amplia.
-  const fallback = await searchAliexpressProducts('gadget')
-  return fallback ?? []
+function get(obj: unknown, key: string): unknown {
+  if (obj && typeof obj === 'object' && key in obj) {
+    return (obj as Record<string, unknown>)[key]
+  }
+  return undefined
 }
 
-// Búsqueda de productos específicos por palabra clave (ordenados por ventas).
-export async function searchAliexpressProducts(
-  keywords: string
-): Promise<AliexpressProduct[] | null> {
-  if (!aliexpressConfigurado()) return null
-
-  const json = await llamarAli('aliexpress.affiliate.product.query', {
-    keywords,
-    page_size: '20',
-    page_no: '1',
-    sort: 'LAST_VOLUME_DESC',
-  })
-  if (!json) return []
-
-  const result =
-    json?.aliexpress_affiliate_product_query_response?.resp_result?.result ??
-    json?.resp_result?.result
-  const products = result?.products?.product ?? result?.products
+function extraerProductos(json: unknown, responseKey: string): AliexpressProduct[] {
+  // Estructura: <responseKey>.resp_result.result.products.product[]  (o sin el wrapper).
+  const wrapper = get(json, responseKey) ?? json
+  const result = get(get(wrapper, 'resp_result'), 'result')
+  const holder = get(result, 'products')
+  const products = Array.isArray(holder) ? holder : get(holder, 'product')
   return mapearProductos(products)
+}
+
+// Búsqueda de productos (ordenable por ventas/precio, filtrable por país de envío).
+// Es la API base del explorador: "aliexpress.affiliate.product.query".
+export async function searchAliexpressProducts(
+  opts: BusquedaOpts
+): Promise<AliexpressProduct[] | null> {
+  if (!aliexpressConfigurado()) return null
+
+  const extra: Record<string, string> = {
+    page_no: String(opts.page ?? 1),
+    page_size: String(opts.pageSize ?? 24),
+    sort: opts.sort ?? 'LAST_VOLUME_DESC',
+  }
+  if (opts.keywords) extra.keywords = opts.keywords
+  if (opts.categoryIds) extra.category_ids = opts.categoryIds
+  if (opts.shipToCountry) extra.ship_to_country = opts.shipToCountry
+
+  const json = await llamarAli('aliexpress.affiliate.product.query', extra)
+  if (!json) return []
+  return extraerProductos(json, 'aliexpress_affiliate_product_query_response')
+}
+
+// Descubrimiento de productos ganadores. Intenta "hot products"; si esa API no
+// tiene permiso (común en cuentas nuevas de afiliado), cae a la búsqueda normal.
+export async function getAliexpressHotProducts(
+  opts: BusquedaOpts = {}
+): Promise<AliexpressProduct[] | null> {
+  if (!aliexpressConfigurado()) return null
+
+  const extra: Record<string, string> = {
+    page_no: String(opts.page ?? 1),
+    page_size: String(opts.pageSize ?? 24),
+  }
+  if (opts.keywords) extra.keywords = opts.keywords
+  if (opts.categoryIds) extra.category_ids = opts.categoryIds
+  if (opts.shipToCountry) extra.ship_to_country = opts.shipToCountry
+
+  const hot = await llamarAli('aliexpress.affiliate.hotproduct.query', extra)
+  const productos = hot ? extraerProductos(hot, 'aliexpress_affiliate_hotproduct_query_response') : []
+  if (productos.length) return productos
+
+  // Fallback: búsqueda normal ordenada por ventas.
+  return searchAliexpressProducts({ ...opts, keywords: opts.keywords || 'gadget' })
 }
